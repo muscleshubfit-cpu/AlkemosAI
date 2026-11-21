@@ -2,7 +2,7 @@
 
 # سجل المصادر — Sources Log
 
-> قاعدة (FOUNDATION_INSTRUCTIONS §1): كل مصدر يُوثق بالرابط + تاريخ الاطلاع + ما يؤكده. التاريخ موحد لهذا الفرز: **2026-11-22** إلا ما نُصّ خلافه.
+> قاعدة (FOUNDATION_INSTRUCTIONS §1): كل مصدر يُوثق بالرابط + تاريخ الاطلاع + ما يؤكده. التاريخ موحد لهذا الفرز: **2026-11-21** إلا ما نُصّ خلافه.
 
 ## 1. النماذج والتراخيص
 
@@ -34,11 +34,11 @@
 
 | المصدر | ما يؤكده |
 |---|---|
-| مستودع alkemos-aws @ `ed57082` (قراءة مباشرة 2026-11-22) | كل بنود خط الأساس (السلاسل/السجل/الحصص/EVO/النشر/التقارير) — انظر `ALKEMOS_BASELINE.md` |
-| فحص AWS CLI حي قراءة-فقط 2026-11-22 (هوية alkemos_aws_api) | هوية/SCP/مثيل Lightsail/Bedrock/التكاليف — انظر `docs/03-infrastructure/aws-audit.md` |
-| GitHub API (repos/muscleshubfit-cpu/AlkemosAI) | خصوصية المستودع وفرعه الأساسي ومحتواه الأولي [مُقيس 2026-11-22] — ثم **تحويله إلى عام (visibility: public) وتثبيته** بأمر المالك عبر PATCH [مُقاس 2026-11-22] |
+| مستودع alkemos-aws @ `ed57082` (قراءة مباشرة 2026-11-21) | كل بنود خط الأساس (السلاسل/السجل/الحصص/EVO/النشر/التقارير) — انظر `ALKEMOS_BASELINE.md` |
+| فحص AWS CLI حي قراءة-فقط 2026-11-21 (هوية alkemos_aws_api) | هوية/SCP/مثيل Lightsail/Bedrock/التكاليف — انظر `docs/03-infrastructure/aws-audit.md` |
+| GitHub API (repos/muscleshubfit-cpu/AlkemosAI) | خصوصية المستودع وفرعه الأساسي ومحتواه الأولي [مُقيس 2026-11-21] — ثم **تحويله إلى عام (visibility: public) وتثبيته** بأمر المالك عبر PATCH [مُقاس 2026-11-21] |
 
-## 4. الطبقات والمواقع المجانية — تحقق دفعة المسار الصفري (كله 2026-11-22)
+## 4. الطبقات والمواقع المجانية — تحقق دفعة المسار الصفري (كله 2026-11-21)
 
 | المصدر | ما يؤكده |
 |---|---|
@@ -73,34 +73,45 @@
 - المصدر «المُقاس داخليًا» يُحال لملفه لا يُكرر.
 - المصادر المدفوعة/غير الرسمية لا تُعتمد للاسعار النهائية — تُستخدم كإشارات فرز فقط.
 
-## 6. تحقق دفعة 3 — إعادة التعريف (كله 2026-11-22)
+## 6. تحقق دفعة 3 — إعادة التعريف (كله 2026-11-21)
 
 | المصدر | ما يؤكده |
 |---|---|
-| https://www.kaggle.com/docs/efficient-gpu-usage (اطلاع 2026-11-22) | حصة Kaggle المجانية: **30 ساعة GPU/أسبوع تتجدد أسبوعيًا** (T4×2/P100)، جلسات حتى ~12 ساعة — بلا بطاقة |
-| https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github + توثيق مجتمعي متطابق (اطلاع 2026-11-22) | رفض git للملفات >100MB؛ **أصول GitHub Releases حتى 2GB للملف** — أساس مرآة الأوزان (ADR-0009) |
-| https://huggingface.co/pricing (اطلاع 2026-11-22) | الحساب المجاني يشمل **100GB تخزين خاص** (‏PRO ‏1TB) — بلا بطاقة؛ أساس التخزين الأول للأوزان |
-| https://developers.cloudflare.com/r2/ + نقاشات مجتمع Cloudflare الرسمية (اطلاع 2026-11-22) | **R2 يتطلب طريقة دفع حتى للطبقة المجانية** — أساس استبعاده (شرط «لا بطاقة») |
-| https://allenai.org/blog/olmo3 + https://allenai.org/olmo (اطلاع 2026-11-22) | **OLMo 3** (‏7B/32B): مفتوح بالكامل — أوزان + بيانات + كود + تقارير (خيار «الانفتاح الكامل» في القائمة القصيرة) |
+| https://www.kaggle.com/docs/efficient-gpu-usage (اطلاع 2026-11-21) | حصة Kaggle المجانية: **30 ساعة GPU/أسبوع تتجدد أسبوعيًا** (T4×2/P100)، جلسات حتى ~12 ساعة — بلا بطاقة |
+| https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github + توثيق مجتمعي متطابق (اطلاع 2026-11-21) | رفض git للملفات >100MB؛ **أصول GitHub Releases حتى 2GB للملف** — أساس مرآة الأوزان (ADR-0009) |
+| https://huggingface.co/pricing (اطلاع 2026-11-21) | الحساب المجاني يشمل **100GB تخزين خاص** (‏PRO ‏1TB) — بلا بطاقة؛ أساس التخزين الأول للأوزان |
+| https://developers.cloudflare.com/r2/ + نقاشات مجتمع Cloudflare الرسمية (اطلاع 2026-11-21) | **R2 يتطلب طريقة دفع حتى للطبقة المجانية** — أساس استبعاده (شرط «لا بطاقة») |
+| https://allenai.org/blog/olmo3 + https://allenai.org/olmo (اطلاع 2026-11-21) | **OLMo 3** (‏7B/32B): مفتوح بالكامل — أوزان + بيانات + كود + تقارير (خيار «الانفتاح الكامل» في القائمة القصيرة) |
 | https://huggingface.co/Qwen/Qwen3.5-35B-A3B/blob/main/LICENSE + صفحات عائلة Qwen3.5 | رخصة عائلة **Qwen3.5 ‏Apache-2.0** من نص الرخصة الرسمي (تحقق ملف لا وصف) |
-| https://aws.amazon.com/free/free-tier-faqs (اطلاع 2026-11-22) | الحسابات الجديدة: رصيد $100 عند التسجيل + حتى $100 استكشافيًا؛ نظام التجربة 12-شهرًا أُلغي للحسابات الجديدة — سياق قاعدة «AWS تُحمَل ولا تُوسَّع» |
-| فحص حي قراءة-فقط عبر boto3 (هوية `alkemos_aws_api`) — 2026-11-22 | مثيل Lightsail `alkemos-test` يعمل (micro_3_0، ‏1GB RAM)؛ التكاليف سبتمبر–نوفمبر **$0.00** — ضمن رصيد $100 حتى 2027-04-09 [مُقيس] |
+| https://aws.amazon.com/free/free-tier-faqs (اطلاع 2026-11-21) | الحسابات الجديدة: رصيد $100 عند التسجيل + حتى $100 استكشافيًا؛ نظام التجربة 12-شهرًا أُلغي للحسابات الجديدة — سياق قاعدة «AWS تُحمَل ولا تُوسَّع» |
+| فحص حي قراءة-فقط عبر boto3 (هوية `alkemos_aws_api`) — 2026-11-21 | مثيل Lightsail `alkemos-test` يعمل (micro_3_0، ‏1GB RAM)؛ التكاليف سبتمبر–نوفمبر **$0.00** — ضمن رصيد $100 حتى 2027-04-09 [مُقيس] |
 | لقطة النسخة الاحتياطية 2026-11-21 (`musclehubeg-backups/snapshots/manifest.json` — قراءة محلية بلا أي PII) | جرد المحتوى الحي: **blog_posts ‏151 صفًا (2.2MB)** · blog_generation_queue ‏230 (6.9MB) · nutrient_reference ‏169 · recipes ‏12 + 140 مكوّنًا · evo_nutrition_patterns ‏9 [مُقيس] |
-| استكشاف قرائي لمستودعات `muscleshubfit-cpu` (alkemos · alkemos-aws · alkemos-authority-engine · musclehubeg-backups · free-exercise-db) — 2026-11-22 | أصول المعرفة: **868 تمرينًا** ثنائي اللغة (الأصل المنبع free-exercise-db بترخيص **Unlicense/ملك عام**) · ~~8,830 صنف طعام~~ (**صُحح إلى 8,162 — دفعة 4، انظر §7**) · 7 برامج · 24 خطة · دستور تحرير بـ14 جهة علمية بيضاء · برومبتات EVO/الخطط/الأدوات العشرة [مُقيس من الكود] |
+| استكشاف قرائي لمستودعات `muscleshubfit-cpu` (alkemos · alkemos-aws · alkemos-authority-engine · musclehubeg-backups · free-exercise-db) — 2026-11-21 | أصول المعرفة: **868 تمرينًا** ثنائي اللغة (الأصل المنبع free-exercise-db بترخيص **Unlicense/ملك عام**) · ~~8,830 صنف طعام~~ (**صُحح إلى 8,162 — دفعة 4، انظر §7**) · 7 برامج · 24 خطة · دستور تحرير بـ14 جهة علمية بيضاء · برومبتات EVO/الخطط/الأدوات العشرة [مُقيس من الكود] |
 
-## 7. تحقق دفعة 4 — مراجعة الخطة v2.1 (فحص حي 2026-11-22 UTC)
+## 7. تحقق دفعة 4 — مراجعة الخطة v2.1 (فحص حي 2026-11-21 UTC)
 
 | المصدر | ما يؤكده |
 |---|---|
 | GitHub API — شجرة `muscleshubfit-cpu/alkemos-aws` @ `main` ‏`ed57082` (2026-11-21T15:18:10Z) | **8,362 مدخلًا / 7,070 ملفًا** · 130 ميجريشن · 56 workflow · 199 ملف docs/ · 5,406 ملف public/ — سطح المصدر الأساسي للمراقبة [مُقيس] |
 | `src/lib/foods.ts` @ ed57082 (تنزيل مباشر وعدّ slug/nameAr/nameEn/per100g) | **8,162 صنفًا** — مطابق لتعليق الملف نفسه («8,162-food array») — **تصحيح الرقم 8,830 الوارد في §6 أعلاه** (كان بلا دليل مباشر) [مُقيس] |
 | `src/lib/exercises.ts` @ ed57082 (عدّ slug/imageKey) | **868 تمرينًا** — تأكيد الرقم الموروث [مُقيس] |
-| README مستودع alkemos-aws (قراءة خام عبر API) | البنية الكاملة (Next.js 16 · Supabase · 5 مزودي توليد + Tavily/Exa بحثًا · Lightsail+Cloudflare) والوحدات المعرفية (EVO، المكتبات، المدونة الثنائية) [اطلاع 2026-11-22] |
-| الصفحة الرئيسية alkemos.com (WebFetch) | 868+ تمرينًا · 8,162+ صنف طعام · ثنائية اللغة · EVO · الأدوات — اتساق أرقام الموقع مع الكود [اطلاع 2026-11-22] |
+| README مستودع alkemos-aws (قراءة خام عبر API) | البنية الكاملة (Next.js 16 · Supabase · 5 مزودي توليد + Tavily/Exa بحثًا · Lightsail+Cloudflare) والوحدات المعرفية (EVO، المكتبات، المدونة الثنائية) [اطلاع 2026-11-21] |
+| الصفحة الرئيسية alkemos.com (WebFetch) | 868+ تمرينًا · 8,162+ صنف طعام · ثنائية اللغة · EVO · الأدوات — اتساق أرقام الموقع مع الكود [اطلاع 2026-11-21] |
 | GitHub API — قائمة مستودعات الحساب (11 مستودعًا) | **alkemos-aws** (عام، نشط، آخر دفع 2026-11-21) هو المرجع الأساسي · **alkemos** (خاص، سلف غير نشط، آخر دفع 2026-10-10) · **seo-skills** (عام، fork لـIllyism/seo-skills) · **alkemos-authority-engine** (خاص) · **musclehubeg-backups** (خاص، لقطات يومية) · **Agent-Reach** (عام، fork لـPanniantong/Agent-Reach، MIT) [مُقيس] |
-| README مستودع seo-skills (قراءة خام عبر API) | **30 مهارة SEO ببطاقات SKILL.md، ترخيص MIT، مواصفة Agent Skills** — بذور الطبقة د (ADR-0015) [اطلاع 2026-11-22] |
-| README مستودع alkemos-authority-engine (قراءة خام عبر API) | محرك سلطة white-hat كامل (7 قنوات · تصنيف روابط صادق · 171 اختبارًا · تشغيل مرتين يوميًا 05:00/17:00 **UTC**) — سابقة جدولة UTC في منظومة المالك [اطلاع 2026-11-22] |
-| README مستودع Agent-Reach (قراءة خام عبر API) | أداة MIT لتمكين الوكلاء من قراءة الإنترنت — مرشح أدوات البحث [غير متحقق التقييم بعد] [اطلاع 2026-11-22] |
-| https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility (اطلاع 2026-11-22) | تحويل مستودع عام إلى خاص: **الـforks العامة تبقى عامة في شبكة منفصلة**، وقد تتأثر stars/watchers/dependency graph — أساس قائمة فحص T1 والقاعدة «لا يوضع في العلني ما لا يصح بقاؤه عامًا أبدًا» (ADR-0019/R-33) |
+| README مستودع seo-skills (قراءة خام عبر API) | **30 مهارة SEO ببطاقات SKILL.md، ترخيص MIT، مواصفة Agent Skills** — بذور الطبقة د (ADR-0015) [اطلاع 2026-11-21] |
+| README مستودع alkemos-authority-engine (قراءة خام عبر API) | محرك سلطة white-hat كامل (7 قنوات · تصنيف روابط صادق · 171 اختبارًا · تشغيل مرتين يوميًا 05:00/17:00 **UTC**) — سابقة جدولة UTC في منظومة المالك [اطلاع 2026-11-21] |
+| README مستودع Agent-Reach (قراءة خام عبر API) | أداة MIT لتمكين الوكلاء من قراءة الإنترنت — مرشح أدوات البحث [غير متحقق التقييم بعد] [اطلاع 2026-11-21] |
+| https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility (اطلاع 2026-11-21) | تحويل مستودع عام إلى خاص: **الـforks العامة تبقى عامة في شبكة منفصلة**، وقد تتأثر stars/watchers/dependency graph — أساس قائمة فحص T1 والقاعدة «لا يوضع في العلني ما لا يصح بقاؤه عامًا أبدًا» (ADR-0019/R-33) |
+
+## 8. تحقق دفعة 5 — تدقيق حدود الموارد المجانية (كله 2026-11-21 UTC)
+
+| المصدر | ما يؤكده |
+|---|---|
+| https://docs.github.com/en/actions/concepts/billing-and-usage + https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions (اطلاع 2026-11-21) | GitHub Actions مجانية على المشغّلات القياسية المستضافة؛ **للمستودعات الخاصة** تُقاس الدقائق ضمن الخطة — أساس تقييد «بلا حد» بالمستودع العام في كل الوثائق |
+| https://docs.github.com/en/get-started/learning-about-github/faq-about-changes-to-githubs-plans (اطلاع 2026-11-21) | خطة GitHub Free تشمل «2,000 Actions minutes for private repositories» — سقف ما بعد التحول إلى خاص (T1 — ADR-0019 §6) |
+| https://www.kaggle.com/docs/efficient-gpu-usage (اطلاع 2026-11-21 — إعادة قراءة دفعة 5) | حصة GPU الأسبوعية «تتجدد أسبوعيًا وهي 30 ساعة **أو أعلى أحيانًا حسب الطلب والموارد**» — حصة قابلة للتغيير من مزودها بلا SLA، لا ضمان؛ يصحح تقديم «30 س/أسبوع دائمًا» كأنه مضمون |
+| https://huggingface.co/docs/hub/storage-limits (اطلاع 2026-11-21) | التخزين الخاص المجاني في HF Hub سقفه **100GB** (PRO ‏1TB · إضافات مدفوعة بالتيرابايت) — تأكيد رقم 100GB في ADR-0009/PLAN §8.2 وتصحيح وصف «بلا حد عملي» في ZERO_COST_PLAN §3.1 |
+| https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases (اطلاع 2026-11-21) | كل ملف ضمن Release يجب أن يكون تحت **2 GiB**، بلا حد على إجمالي حجم الإصدار أو النطاق — تأكيد مرآة Releases |
+
 
 </div>
