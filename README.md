@@ -1,61 +1,64 @@
 # AlkemosAI
 
-**AlkemosAI — مشروع مستقل لبناء نموذج ذكاء اصطناعي مملوك يتعلم ويتراكم (لياقة · تغذية · علوم رياضة · عربي/إنجليزي) | A standalone project building an owned AI model that learns and accumulates**
+**AlkemosAI — مشروع مستقل لبناء نظام معرفي مملوك يتعلم ويتراكم (نموذج + مهارات + خبرة SEO/GEO/AEO · عربي/إنجليزي) | A standalone project building an owned, accumulative intelligence system (model + skills + SEO/GEO/AEO expertise · AR/EN)**
 
 <div dir="rtl" align="right">
 
-## ما هذا المستودع؟ (إعادة التعريف — 2026-11-22)
+## ما هذا المستودع؟ (مراجعة v2.1 — 2026-11-22 UTC)
 
-هذا هو المقر الدائم لمشروع **AlkemosAI** بعد إعادة تعريفه بتوجيه المالك: **مشروع مستقل هدفه بناء نموذج ذكاء اصطناعي مملوك يتعلم ويتراكم ويتطور باستمرار** — يُبنى فوق نماذج مفتوحة بتراخيص تسمح بالتملك والتعديل (Apache-2.0/MIT فقط)، ويتعلم **على دفعات** بلا تشغيل دائم ولا خادم استدلال ولا GPU مستمر، وكل ما يكتسبه (معرفة، بيانات، ذاكرة، أوزان، سجلات تعلم) يعيش في **ملفات وأصول مملوكة قابلة للنقل بين الاستضافات**.
+هذا هو المقر الدائم لمشروع **AlkemosAI**: مشروع مستقل هدفه بناء **نظام معرفي مملوك يتعلم ويتراكم** — نموذج ذكاء اصطناعي متخصص (لياقة/تغذية/علوم رياضة، عربي/إنجليزي) يتعلم على دفعات فوق نماذج مفتوحة بتراخيص تسمح بالتملك (Apache-2.0/MIT فقط)، محاطًا بأربع طبقات تراكم مملوكة (معرفة وبيانات · ذاكرة · **مهارات** · أوزان)، يستمد معرفته أساسًا من **مستودع Alkemos الأساسي (`alkemos-aws`)** عبر **مراقب اكتشاف تلقائي** لكل إضافة أو تعديل مستقبلي، ويبني **بحثًا خارجيًا مستقلًا** (فصل صارم بين الجمع والاعتماد) و**خبرة SEO/GEO/AEO متراكمة** — ويعتمد كل تعلم جديدًا فقط عبر **بوابات تقييم ثنائية اللغة** (G-K/G-S/G-Q). كل الأصول في ملفات مملوكة قابلة للنقل بين الاستضافات.
 
-**ما ليس عليه هذا المشروع (غير الأهداف — ADR-0007):** لا يُشغَّل لخدمة المستخدمين، ولا يستبدل أو يعدّل نظام الذكاء الاصطناعي الحالي في Alkemos، ولا يمس إنتاج Alkemos أو خوادمه أو قواعد بياناته أو مزوديه، وليس واجهة لتجميع واجهات برمجية.
+**ما ليس عليه هذا المشروع (غير الأهداف — ADR-0007):** لا يُشغَّل لخدمة المستخدمين، ولا يستبدل أو يعدّل نظام الذكاء الاصطناعي الحالي في Alkemos، ولا يمس إنتاج Alkemos أو خوادمه أو قواعد بياناته أو مزوديه (ولا حتى تعديلات «تحسين SEO» — مخرجات الخبرة توصيات فقط)، وليس واجهة لتجميع واجهات برمجية. **العلنية مؤقتة للمراجعة فقط، ويتحول المستودع إلى خاص عند اكتمال المشروع (ADR-0019/D-14).**
 
 ## الوثيقة المركزية
 
 | الملف | الغرض |
 |---|---|
-| [`PLAN.md`](PLAN.md) | **الخطة المعمارية والتنفيذية v2.0** — معمارية التعلم التراكمي، المراحل M0–M5، الحدود الصادقة. بانتظار الاعتماد (D-11) |
+| [`PLAN.md`](PLAN.md) | **الخطة المعمارية والتنفيذية v2.1** — أربع طبقات + منظومتا دخول + مسارات M + C + بوابة T1. بانتظار الاعتماد (D-11) |
 | [`STATE.md`](STATE.md) | **أول ملف تقرؤه في أي جلسة** — الحالة الحية والقرارات المعلقة |
-| [`VISION.md`](VISION.md) | الرؤية، أعمدة الملكية، سلّم نمو النموذج A0–A5 |
-| [`MASTER_ROADMAP.md`](MASTER_ROADMAP.md) | خارطة الطريق: المراحل والبوابات وخريطة الاستبدال من الخطة القديمة |
-| [`DECISIONS.md`](DECISIONS.md) | سجل القرارات (مع `decisions/ADR/` — ADR-0001 حتى ADR-0011) |
-| [`COST_MODEL.md`](COST_MODEL.md) | نموذج التكاليف — الخطة الحالية صفر التزامات مالية |
-| [`ZERO_COST_PLAN.md`](ZERO_COST_PLAN.md) | بحث المواقع المجانية وحدودها (مرجع ساري؛ خطة F0–F5 مُستبدلة بمراحل M) |
-| [`ALKEMOS_BASELINE.md`](ALKEMOS_BASELINE.md) | خط أساس Alkemos الحقيقي المُقيس من الكود (مرجع ساري) |
-| [`RISK_REGISTER.md`](RISK_REGISTER.md) | سجل المخاطر (R-01 حتى R-26) |
-| [`SECURITY.md`](SECURITY.md) | سياسات الأسرار والخصوصية |
+| [`VISION.md`](VISION.md) | الرؤية، أعمدة الملكية (11)، سلّما النمو A0–A5 والاستقلالية Aut0–Aut3 |
+| [`MASTER_ROADMAP.md`](MASTER_ROADMAP.md) | خارطة الطريق: المسارات M/C والبوابات والختم T1 |
+| [`DECISIONS.md`](DECISIONS.md) | سجل القرارات (مع `decisions/ADR/` — ADR-0001 حتى ADR-0019) |
+| [`COST_MODEL.md`](COST_MODEL.md) | نموذج التكاليف — **صفر التزامات حاليًا** + فرز «مجاني الآن مقابل موارد مستقبلية» |
+| [`ZERO_COST_PLAN.md`](ZERO_COST_PLAN.md) | بحث المواقع المجانية وحدودها (مرجع ساري) |
+| [`ALKEMOS_BASELINE.md`](ALKEMOS_BASELINE.md) | خط أساس Alkemos المُقيس (مرجع ساري + فحص لاحق 2026-11-22) |
+| [`RISK_REGISTER.md`](RISK_REGISTER.md) | سجل المخاطر (R-01 حتى R-37) |
+| [`SECURITY.md`](SECURITY.md) | سياسات الأسرار والخصوصية والرصد والبحث |
 
-## هيكل المستودع (الطبقات الثلاث للتراكم)
+## هيكل المستودع (طبقات التراكم الأربع + خط الدخول)
 
 ```
 datasets/     الطبقة أ — المعرفة والبيانات المملوكة (JSONL + بطاقات، موثقة الترخيص)
-memory/       الطبقة ب — الذاكرة (بطاقات معرفة + سجل التعلم + صندوق ملاحظات)
-training/     الطبقة ج — إعدادات وتقارير دفعات التدريب (تُنشأ عند M3)
+memory/       الطبقة ب — الذاكرة v2 (بطاقات بتعارضات ونسخ + سجل التعلم + صناديق مراجعة)
+skills/       الطبقة د — المهارات المكتسبة (SKILL.md موثقة مقيمة الجودة — بوابة G-S)
+training/     إعدادات وتقارير دفعات التدريب (تُنشأ عند M3)
 evaluation/   بطارية التقييم ثنائية اللغة + النتائج الموقعة (بوابة كل تعلم)
 registry/     سجل النماذج: إصدارات ← أصول (HF/Releases) + المؤشر الأفضل
+research/     خط الدخول: مراقب المصدر الأساسي (alkemos-aws) + البحث الخارجي (مرشحون فقط)
 ```
 
-## نقطة الانطلاق (مُقيس 2026-11-22)
+## نقطة الانطلاق (فحص حي 2026-11-22 UTC — المصدر الأساسي alkemos-aws @ `ed57082`)
 
-المشروع لا يبدأ من فراغ — أصول معرفية فعلية جاهزة للتوظيف (جُردت من مستودعات Alkemos والنسخ الاحتياطية وفحص AWS الحي اليوم):
-
-- **868 تمرينًا** ثنائي اللغة · **8,830 صنف طعام** · **7 برامج تدريبية** · **24 خطة غذائية**
-- **151 مقالًا** منشورًا (2.2MB) + **230 سجل توليد** · **169 مرجعًا غذائيًا** · دستور تحرير بـ14 جهة علمية بيضاء
-- بيئات مجانية مثبتة: **Kaggle ‏30 GPU-س/أسبوع** · **GHA بلا حد** · **HF ‏100GB تخزين خاص** · **GitHub Releases ≤2GB/ملف** — بلا بطاقة بنكية
-- **AWS:** مثيل الإنتاج يعمل بتكلفة **$0** (مُقيس سبتمبر–نوفمبر) — يُحمَل ولا يُوسَّع (ADR-0010)
+- **أصول معرفية مُقيسة:** **868 تمرينًا** ثنائي اللغة · **8,162 صنف طعام** (تصحيح رقم سابق غير مثبت) · 7 برامج · 24 خطة غذائية · 151 مقالًا منشورًا · 169 مرجعًا غذائيًا · دستور تحرير بـ14 جهة علمية بيضاء.
+- **كوربوس SEO/GEO/AEO حقيقي في المصدر الأساسي:** مخططات SEO-GEO وتدقيقات GSC وEEAT وسكيما + وحدة إجابات GEO إنتاجية — مادة تعلم لمسار الخبرة.
+- **أصول النظام البيئي:** 30 مهارة SEO جاهزة (MIT) · محرك سلطة white-hat كامل (خاص) · أداة قراءة إنترنت للوكلاء (MIT).
+- **بيئات مجانية مثبتة:** Kaggle 30 GPU-س/أسبوع · GHA بلا حد · HF ‏100GB خاص · Releases ≤2GB/ملف — بلا بطاقة بنكية.
+- **AWS:** الإنتاج يعمل بتكلفة $0 مُقيس — يُحمَل ولا يُوسَّع.
 
 ## الحوكمة
 
 - **المالك:** أحمد (`muscleshubfit@gmail.com`) — كل قرار تنفيذي يمس الإنتاج أو الميزانية يحتاج موافقته الموثقة.
-- **الحالة الحالية:** المشروع تخطيطي/توثيقي — **لا تنفيذ قبل اعتماد الخطة v2.0 (قرار D-11)**.
-- مسموح: البحث، التخطيط، التوثيق، الفحص القرائي للإنتاج. ممنوع دون موافقة مستقلة: تعديل كود Alkemos أو مزوديه أو خوادمه، الشراء أو الاشتراكات، أي خدمة تتطلب بطاقة بنكية، بدء التدريب.
+- **الحالة الحالية:** تخطيطي/توثيقي — **لا تنفيذ قبل اعتماد خطة v2.1 (قرار D-11 — مسارا M وC)**. ولا تدريب بدأ ولا نموذج شُغل ولا أي التزام مالي أُنشئ.
+- مسموح: البحث والتخطيط والتوثيق والفحص/الرصد القرائي قراءة-فقط. ممنوع دون موافقة مستقلة: تعديل كود Alkemos أو مزوديه أو خوادمه (أو إنتاجه ولو لتحسين SEO)، الشراء أو الاشتراكات، بدء التدريب.
+- **قانون التوقيت (ADR-0013):** كل طابع مخزن UTC (ISO-8601 بلاحقة Z)؛ المحلي يوثق بإزاحته (المالك: Africa/Cairo).
+- **العلنية مؤقتة للمراجعة** (ADR-0019): قاعدة «لا يوضع في العلني ما لا يصح بقاؤه عامًا أبدًا» — والتحول إلى خاص عند الاكتمال بقرار D-14.
 - **لا أسرار هنا أبدًا** — انظر `SECURITY.md`.
 
 ## كيف تعمل أي جلسة جديدة؟
 
 1. اقرأ `STATE.md` (الحالة والقرارات المعلقة).
-2. اقرأ `PLAN.md` (الخطة المعتمدة/المعروضة) وملف المرحلة ذات الصلة.
-3. عند إنجاز أي دفعة: حدّث `STATE.md` + سجّل القرار (ADR عند الحاجة) + commit/push إلى `main`.
+2. اقرأ `PLAN.md` (الخطة المعروضة) وADR ذات الصلة.
+3. عند إنجاز أي دفعة: حدّث `STATE.md` + سجّل القرار (ADR عند الحاجة) + commit/push إلى `main` (طوابع UTC).
 
 </div>
 
@@ -63,8 +66,8 @@ registry/     سجل النماذج: إصدارات ← أصول (HF/Releases) +
 
 # AlkemosAI (English)
 
-**What this repository is:** the permanent home of the AlkemosAI project after its owner-directed redefinition (2026-11-22): a **standalone project building an owned AI model that learns and accumulates** — specialized in fitness, nutrition and sports science (Arabic/English), built on open-weight models under ownership-friendly licenses (Apache-2.0/MIT only), trained **in gated batches** with no continuous serving, no permanent inference server and no always-on GPU. Everything the model learns (knowledge, data, memory, weights, learning logs) lives in **owned, portable files and assets** transferable between hosts.
+**What this repository is:** the permanent home of the AlkemosAI project, now an **owned, accumulative intelligence system**: a specialized bilingual (AR/EN) model trained in gated batches on ownership-friendly open weights (Apache-2.0/MIT only), surrounded by **four owned accumulation layers** (data & knowledge · memory with conflict detection & versioning · **skills** · weights), fed primarily by the **main Alkemos production repository (`alkemos-aws`) through an automatic change-discovery watcher**, plus an **independent external-research pipeline** (strict separation between collection and adoption) and a compounding **SEO/GEO/AEO expertise track**. Every new learning — knowledge, skill, or weights — passes a **bilingual acceptance gate** (G-K/G-S/G-Q). All assets live in owned, portable files.
 
-**Explicit non-goals (ADR-0007):** not run to serve users; not a replacement for (or modification of) Alkemos's current AI system; never touches Alkemos production, servers, databases or providers; not an API-aggregation facade.
+**Explicit non-goals (ADR-0007):** never run to serve users; never replace or modify Alkemos's current AI system; never touch Alkemos production, servers, databases or providers (including production SEO changes — the expertise track produces recommendations only); not an API-aggregation facade. **The repository is public temporarily for review only and converts to private at project completion (ADR-0019 / decision D-14).**
 
-**Status:** planning/documentation phase — the v2.0 plan (`PLAN.md`) awaits owner approval (decision D-11) before any execution begins. **Governance:** owner Ahmed approves every production- or budget-affecting decision; no secrets ever (`SECURITY.md`); new sessions start at `STATE.md`.
+**Status:** planning/documentation phase — the v2.1 plan (`PLAN.md`, tracks M + C) awaits owner approval (decision D-11) before any execution. No training started, no model served, no financial commitment created. **Time law (ADR-0013):** all stored timestamps are UTC (ISO-8601, `Z` suffix); local times documented with their offset. **Governance:** owner Ahmed approves every production- or budget-affecting decision; no secrets ever (`SECURITY.md`); new sessions start at `STATE.md`.
