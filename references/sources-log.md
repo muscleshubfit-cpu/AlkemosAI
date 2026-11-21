@@ -36,9 +36,38 @@
 |---|---|
 | مستودع alkemos-aws @ `ed57082` (قراءة مباشرة 2026-11-22) | كل بنود خط الأساس (السلاسل/السجل/الحصص/EVO/النشر/التقارير) — انظر `ALKEMOS_BASELINE.md` |
 | فحص AWS CLI حي قراءة-فقط 2026-11-22 (هوية alkemos_aws_api) | هوية/SCP/مثيل Lightsail/Bedrock/التكاليف — انظر `docs/03-infrastructure/aws-audit.md` |
-| GitHub API (repos/muscleshubfit-cpu/AlkemosAI) | خصوصية المستودع وفرعه الأساسي ومحتواه الأولي [مُقيس 2026-11-22] |
+| GitHub API (repos/muscleshubfit-cpu/AlkemosAI) | خصوصية المستودع وفرعه الأساسي ومحتواه الأولي [مُقيس 2026-11-22] — ثم **تحويله إلى عام (visibility: public) وتثبيته** بأمر المالك عبر PATCH [مُقاس 2026-11-22] |
 
-## 4. قاعدة التحديث
+## 4. الطبقات والمواقع المجانية — تحقق دفعة المسار الصفري (كله 2026-11-22)
+
+| المصدر | ما يؤكده |
+|---|---|
+| https://kaggle.com/docs/efficient-gpu-usage | حصة Kaggle المجانية: 30 ساعة GPU/أسبوع تتجدد أسبوعيًا (T4×2/P100) — بلا بطاقة |
+| https://huggingface.co/docs/hub/spaces-overview | HF Spaces CPU Basic: 2 vCPU / 16GB RAM مجانًا؛ الأجهزة المجانية «تنام» بعد خمول (48 ساعة موثقة من إدارة المساحات) |
+| https://colab.research.google.com/signup | الطبقة المجانية في Colab: وصول GPU محدود جدًا، وجلسات لا تتجاوز 12 ساعة — بلا بطاقة |
+| https://openrouter.ai/pricing | نماذج `:free`: 20 طلب/دقيقة و50 طلب/يوم بلا رصيد؛ 1000/يوم تتطلب شراء $10 (مستبعدة عندنا) |
+| https://console.groq.com/docs/rate-limits | وثائق حدود Groq (الطبقة المجانية قائمة بحدود لكل نموذج) — التفاصيل الحية في عداداتنا المُقيسة |
+| https://developers.cloudflare.com/workers-ai/platform/pricing | Workers AI: 10,000 عصبون/يوم مجانًا على خطة Workers Free |
+| https://www.cloudflare.com/products/vectorize | «ابدأ مجانًا — بلا بطاقة بنكية» |
+| https://developers.cloudflare.com/vectorize/platform/pricing | Vectorize على Workers Free: 5M بعد مخزن + 30M بعد مستعلم/شهر + 100 فهرس مجانًا |
+| https://ai.google.dev/gemini-api/docs/rate-limits (+ /pricing) | بنية الطبقة المجانية لـGemini: حدود يومية صارمة ومتقلصة تاريخيًا؛ بحث Gemini 3+ مجاني 5,000 طلب/شهر |
+| https://docs.oracle.com/iaas/Content/FreeTier/freetier.htm | Oracle Always Free تتطلب بطاقة عند التسجيل (تحقق $1) — أساس استبعادها |
+| https://build.nvidia.com | NIM: واجهات serverless مجانية للتطوير — بلا بطاقة |
+| https://supabase.com/pricing + https://supabase.com/docs/guides/platform/free-project-pausing | Supabase مجاني: 500MB · مشروعان نشطان · إيقاف بعد 7 أيام خمول · إضافة pgvector رسمية |
+| https://upstash.com/pricing/redis | Upstash مجاني: 250MB و500K أمر/شهر |
+| https://www.tavily.com/pricing | Tavily: 1,000 رصيد/شهر — بلا بطاقة |
+| https://docs.github.com/billing/managing-billing-for-github-actions/about-billing-for-github-actions | GitHub Actions مجانية بلا حد على المشغّلات القياسية للمستودعات العامة |
+| https://github.com/ggml-org/llama.cpp | llama.cpp ‏MIT: خادم متوافق مع OpenAI + نقطة `/v1/embeddings`؛ سحب GGUF مباشرة من HF (`llama serve -hf`) |
+| https://github.com/ollama/ollama | Ollama مفتوح المصدر (MIT) |
+| https://github.com/vllm-project/vllm | vLLM ‏Apache-2.0 |
+| https://github.com/unslothai/unsloth | Unsloth نواة مفتوحة Apache-2.0 — تدريب QLoRA على GPU Colab/Kaggle المجانية |
+| https://developers.cloudflare.com/workers-ai/models/bge-m3 + https://huggingface.co/BAAI/bge-m3 | bge-m3 متعدد اللغات (100+ لغة، حتى 8192 توكن) متاح على Workers AI — للتضمين ضمن العصبونات المجانية |
+| https://huggingface.co/Qwen/Qwen3.5-0.8B (+ مقارنات 2026) | عائلة Qwen3.5 ‏Apache-2.0 بفروع صغيرة 0.8B/2B/4B مع GGUF رسمية — مرشح التدريب الأول |
+| https://huggingface.co/docs/inference-providers/en/pricing | رصيد الحساب المجاني في HF Inference ~$0.10/شهر — للفحص فقط |
+| https://modal.com/pricing + إشارات التسجيل | Modal: $30 رصيد/شهر — اشتراط البطاقة غير محسوم التوثيق → استبعاد احترازي |
+| https://lightning.ai/pricing | Lightning AI: ساعات GPU تأسيسية (50–80) تُستهلك مرة واحدة → نمط تجربة → مستبعد |
+
+## 5. قاعدة التحديث
 
 - أي مصدر جديد يضاف بصف جديد بنفس النمط (مع تاريخ اطلاعه الخاص إن اختلف).
 - المصدر «المُقاس داخليًا» يُحال لملفه لا يُكرر.
