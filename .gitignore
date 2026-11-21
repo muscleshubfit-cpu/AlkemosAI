@@ -1,0 +1,26 @@
+# Secrets — NEVER commit
+.env
+.env.*
+*.pem
+*.key
+secrets/
+credentials*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# Model artifacts (large binaries live outside git)
+*.gguf
+*.safetensors
+*.bin
+models/
+checkpoints/
+
+# Data exports (approved datasets are versioned deliberately)
+data/raw/
+*.csv.tmp
+
+# Node (if tooling is added later)
+node_modules/
