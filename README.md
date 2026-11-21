@@ -14,7 +14,7 @@
 
 | الملف | الغرض |
 |---|---|
-| [`PLAN.md`](PLAN.md) | **الخطة المعمارية والتنفيذية v2.1.1** — أربع طبقات + منظومتا دخول + مسارات M + C + بوابة T1 (وتصحيحات دفعة 5). بانتظار الاعتماد (D-11) |
+| [`PLAN.md`](PLAN.md) | **الخطة المعمارية والتنفيذية v2.1.1** — أربع طبقات + منظومتا دخول + مسارات M + C + بوابة T1. **معتمدة بقرار D-11 (2026-11-21 UTC) — التنفيذ بدأ: M1 + C1 نشطان (دفعة 6)** |
 | [`STATE.md`](STATE.md) | **أول ملف تقرؤه في أي جلسة** — الحالة الحية والقرارات المعلقة |
 | [`VISION.md`](VISION.md) | الرؤية، أعمدة الملكية (11)، سلّما النمو A0–A5 والاستقلالية Aut0–Aut3 |
 | [`MASTER_ROADMAP.md`](MASTER_ROADMAP.md) | خارطة الطريق: المسارات M/C والبوابات والختم T1 |
@@ -48,7 +48,7 @@ research/     خط الدخول: مراقب المصدر الأساسي (alkemos
 ## الحوكمة
 
 - **المالك:** أحمد (`muscleshubfit@gmail.com`) — كل قرار تنفيذي يمس الإنتاج أو الميزانية يحتاج موافقته الموثقة.
-- **الحالة الحالية:** تخطيطي/توثيقي — **لا تنفيذ قبل اعتماد خطة v2.1 (قرار D-11 — مسارا M وC)**. ولا تدريب بدأ ولا نموذج شُغل ولا أي التزام مالي أُنشئ.
+- **الحالة الحالية (دفعة 6):** التنفيذ بدأ بأمر المالك (**D-11 صدر 2026-11-21 UTC**): M1 نشطة (نواة المعرفة والذاكرة v0) وC1 نشط (مراقب قراءة-فقط كل 6 ساعات UTC). **لا تدريب أوزان بدأ** (بعد M1 وقياس M2) ولا نموذج شُغل ولا أي التزام مالي أُنشئ ولا مساس بإنتاج Alkemos.
 - مسموح: البحث والتخطيط والتوثيق والفحص/الرصد القرائي قراءة-فقط. ممنوع دون موافقة مستقلة: تعديل كود Alkemos أو مزوديه أو خوادمه (أو إنتاجه ولو لتحسين SEO)، الشراء أو الاشتراكات، بدء التدريب.
 - **قانون التوقيت (ADR-0013):** كل طابع مخزن UTC (ISO-8601 بلاحقة Z)؛ المحلي يوثق بإزاحته (المالك: Africa/Cairo).
 - **العلنية مؤقتة للمراجعة** (ADR-0019): قاعدة «لا يوضع في العلني ما لا يصح بقاؤه عامًا أبدًا» — والتحول إلى خاص عند الاكتمال بقرار D-14.
@@ -70,4 +70,4 @@ research/     خط الدخول: مراقب المصدر الأساسي (alkemos
 
 **Explicit non-goals (ADR-0007):** never run to serve users; never replace or modify Alkemos's current AI system; never touch Alkemos production, servers, databases or providers (including production SEO changes — the expertise track produces recommendations only); not an API-aggregation facade. **The repository is public temporarily for review only and converts to private at project completion (ADR-0019 / decision D-14).**
 
-**Status:** planning/documentation phase — the v2.1 plan (`PLAN.md`, tracks M + C) awaits owner approval (decision D-11) before any execution. No training started, no model served, no financial commitment created. **Time law (ADR-0013):** all stored timestamps are UTC (ISO-8601, `Z` suffix); local times documented with their offset. **Governance:** owner Ahmed approves every production- or budget-affecting decision; no secrets ever (`SECURITY.md`); new sessions start at `STATE.md`.
+**Status (batch 6):** execution started by owner order (**D-11 granted 2026-11-21 UTC**): M1 (knowledge core + memory v0) and C1 (read-only source watcher, every 6h UTC) are active. No weights training yet (that follows M1 + M2 measurement); no model served; no financial commitment created; Alkemos production untouched. **Time law (ADR-0013):** all stored timestamps are UTC (ISO-8601, `Z` suffix); local times documented with their offset. **Governance:** owner Ahmed approves every production- or budget-affecting decision; no secrets ever (`SECURITY.md`); new sessions start at `STATE.md`.

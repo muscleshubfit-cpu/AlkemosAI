@@ -1,0 +1,56 @@
+name: "C1 — مراقب المصدر الأساسي (قراءة-فقط)"
+
+# ADR-0012 · بدفعة 6 عقب اعتماد D-11 — قراءة-فقط للمصدر الأساسي alkemos-aws
+# عبر GitHub API العام (بلا أسرار — R-35). المخرجات «مرشحة» فقط: digests +
+# مرشحات معرفية في memory/inbox/monitor/ — الاعتماد عبر بوابة G-K فقط.
+# لقطات المحتوى اليومية (musclehubeg-backups) غير مفعّلة قبل قرار D-15.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # كل 6 ساعات UTC (إيقاع البدء المعلن — ADR-0012)
+  workflow_dispatch: {}      # تشغيل يدوي للتحقق
+
+permissions:
+  contents: write            # لحفظ digests وstate في هذا المستودع (alkemosai) فقط
+
+concurrency:
+  group: c1-primary-source-monitor
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: استنساخ المستودع
+        uses: actions/checkout@v4
+
+      - name: تشغيل المراقب (قراءة-فقط عبر GitHub API العام)
+        run: python scripts/c1_primary_source_monitor.py
+
+      - name: حفظ المخرجات (حارس مسارات صارم)
+        run: |
+          set -euo pipefail
+          CHANGED="$(git status --porcelain)"
+          if [ -z "$CHANGED" ]; then
+            echo "لا تغييرات جديدة في المصدر الأساسي — لا شيء يُحفظ."
+            exit 0
+          fi
+          echo "$CHANGED"
+          BAD=0
+          while IFS= read -r line; do
+            path="${line:3}"
+            case "$path" in
+              research/source-watch/*|memory/inbox/monitor/*) ;;
+              *) echo "::error::المراقب لا يكتب خارج مساراته المعلنة: $path"; BAD=1 ;;
+            esac
+          done <<< "$CHANGED"
+          if [ "$BAD" -ne 0 ]; then
+            echo "::error::أُجهض الحفظ — ملفات غير متوقعة."
+            exit 1
+          fi
+          git config user.name "alkemosai-c1-monitor"
+          git config user.email "c1-monitor@users.noreply.github.com"
+          git add research/source-watch memory/inbox/monitor
+          git commit -m "c1(monitor): digest جديد للمصدر الأساسي — $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+          git push
