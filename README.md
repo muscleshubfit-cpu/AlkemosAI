@@ -1,57 +1,61 @@
 # AlkemosAI
 
-**AlkemosAI — مشروع منظومة ذكاء اصطناعي مستقلة ومملوكة بالكامل (نموذج، أوزان، بيانات، ذاكرة، معرفة) لخدمات اللياقة والتغذية والصحة بالعربية والإنجليزية | Independent fully-owned AI system for fitness, nutrition and health (AR/EN)**
+**AlkemosAI — مشروع مستقل لبناء نموذج ذكاء اصطناعي مملوك يتعلم ويتراكم (لياقة · تغذية · علوم رياضة · عربي/إنجليزي) | A standalone project building an owned AI model that learns and accumulates**
 
 <div dir="rtl" align="right">
 
-## ما هذا المستودع؟
+## ما هذا المستودع؟ (إعادة التعريف — 2026-11-22)
 
-هذا هو **المقر الدائم لمشروع AlkemosAI** — مستودع **عام** (بأمر المالك 2026-11-22 — ADR-0006) يحمل الرؤية وخط الأساس والخطة الكاملة لبناء منظومة ذكاء اصطناعي **نملكها نحن**: أوزانها وكودها وبياناتها وذاكرتها ومعرفتها، قابلة للنقل بين الاستضافات، وصولًا إلى العمل دون أي اعتماد دائم على مزودي نماذج خارجيين.
+هذا هو المقر الدائم لمشروع **AlkemosAI** بعد إعادة تعريفه بتوجيه المالك: **مشروع مستقل هدفه بناء نموذج ذكاء اصطناعي مملوك يتعلم ويتراكم ويتطور باستمرار** — يُبنى فوق نماذج مفتوحة بتراخيص تسمح بالتملك والتعديل (Apache-2.0/MIT فقط)، ويتعلم **على دفعات** بلا تشغيل دائم ولا خادم استدلال ولا GPU مستمر، وكل ما يكتسبه (معرفة، بيانات، ذاكرة، أوزان، سجلات تعلم) يعيش في **ملفات وأصول مملوكة قابلة للنقل بين الاستضافات**.
 
-المستودع **تخطيطي/بحثي/توثيقي** في هذه المرحلة: لا يحتوي كود تطبيق، ولا يمس إنتاج Alkemos (المستودع المرجعي: `muscleshubfit-cpu/alkemos-aws` — يُفحص قراءةً فقط).
+**ما ليس عليه هذا المشروع (غير الأهداف — ADR-0007):** لا يُشغَّل لخدمة المستخدمين، ولا يستبدل أو يعدّل نظام الذكاء الاصطناعي الحالي في Alkemos، ولا يمس إنتاج Alkemos أو خوادمه أو قواعد بياناته أو مزوديه، وليس واجهة لتجميع واجهات برمجية.
 
-## نقطة البداية (خط الأساس — 2026-11-22)
-
-فُحص مستودع Alkemos الفعلي بالكامل (الالتزام `ed57082`)، والنتيجة الموثقة في [`ALKEMOS_BASELINE.md`](ALKEMOS_BASELINE.md):
-
-- منظومة AI موحدة نسبيًا: 5 مزودي توليد (OpenRouter، Groq، NVIDIA NIM، Gemini ذيلًا فقط، Cloudflare) + مزودا بحث (Tavily، Exa) — **كلها طبقات مجانية**.
-- طبقة توجيه مركزية مجربة (Registry + Router + تراجع بمتغير واحد) وسجل مهام وحصص وتبريد صادق.
-- الإنتاج: AWS Lightsail (eu-north-1) + Supabase (eu-central-1) + GitHub Actions كحوسبة دفعية، بتكلفة صافية $0/شهر حاليًا.
-- الفجوة الجوهرية: **صفر ملكية للنماذج أو الأوزان** واعتماد وجودي على APIs خارجية — وهذا ما وُجد المشروع لعلاجه.
-
-## الوثائق الجذرية
+## الوثيقة المركزية
 
 | الملف | الغرض |
 |---|---|
+| [`PLAN.md`](PLAN.md) | **الخطة المعمارية والتنفيذية v2.0** — معمارية التعلم التراكمي، المراحل M0–M5، الحدود الصادقة. بانتظار الاعتماد (D-11) |
 | [`STATE.md`](STATE.md) | **أول ملف تقرؤه في أي جلسة** — الحالة الحية والقرارات المعلقة |
-| [`ALKEMOS_BASELINE.md`](ALKEMOS_BASELINE.md) | خط أساس Alkemos الحقيقي المُقيس من الكود |
-| [`VISION.md`](VISION.md) | الرؤية وأعمدة الملكية العشرة وسلّم النضج L0–L5 |
-| [`MASTER_ROADMAP.md`](MASTER_ROADMAP.md) | الخطة الرئيسية: المراحل 0–10 والتبعيات والمعايير |
-| [`DECISIONS.md`](DECISIONS.md) | سجل القرارات (مع `decisions/ADR/`) |
-| [`COST_MODEL.md`](COST_MODEL.md) | نموذج التكاليف ونقطة التعادل |
-| [`ZERO_COST_PLAN.md`](ZERO_COST_PLAN.md) | **المسار النشط:** الحل العملي المتكامل المجاني 100% وخطة التنفيذ F0–F5 (معتمد بأمر المالك — ADR-0006) |
-| [`RISK_REGISTER.md`](RISK_REGISTER.md) | سجل المخاطر |
+| [`VISION.md`](VISION.md) | الرؤية، أعمدة الملكية، سلّم نمو النموذج A0–A5 |
+| [`MASTER_ROADMAP.md`](MASTER_ROADMAP.md) | خارطة الطريق: المراحل والبوابات وخريطة الاستبدال من الخطة القديمة |
+| [`DECISIONS.md`](DECISIONS.md) | سجل القرارات (مع `decisions/ADR/` — ADR-0001 حتى ADR-0011) |
+| [`COST_MODEL.md`](COST_MODEL.md) | نموذج التكاليف — الخطة الحالية صفر التزامات مالية |
+| [`ZERO_COST_PLAN.md`](ZERO_COST_PLAN.md) | بحث المواقع المجانية وحدودها (مرجع ساري؛ خطة F0–F5 مُستبدلة بمراحل M) |
+| [`ALKEMOS_BASELINE.md`](ALKEMOS_BASELINE.md) | خط أساس Alkemos الحقيقي المُقيس من الكود (مرجع ساري) |
+| [`RISK_REGISTER.md`](RISK_REGISTER.md) | سجل المخاطر (R-01 حتى R-26) |
 | [`SECURITY.md`](SECURITY.md) | سياسات الأسرار والخصوصية |
 
-خطة المراحل الكاملة في `docs/00-foundation/` حتى `docs/10-final-report/` — كل مرحلة بملف واحد يضم: الهدف، النطاق، المهام التفصيلية، الأوامر المرجعية، المخرجات، معايير النجاح، المخاطر، التبعيات، والحالة. التعليمات المشتركة الموحدة في `docs/00-foundation/FOUNDATION_INSTRUCTIONS.md` (لا تكرر في كل مرحلة).
+## هيكل المستودع (الطبقات الثلاث للتراكم)
 
-## المسار المعتمد (أمر المالك 2026-11-22)
+```
+datasets/     الطبقة أ — المعرفة والبيانات المملوكة (JSONL + بطاقات، موثقة الترخيص)
+memory/       الطبقة ب — الذاكرة (بطاقات معرفة + سجل التعلم + صندوق ملاحظات)
+training/     الطبقة ج — إعدادات وتقارير دفعات التدريب (تُنشأ عند M3)
+evaluation/   بطارية التقييم ثنائية اللغة + النتائج الموقعة (بوابة كل تعلم)
+registry/     سجل النماذج: إصدارات ← أصول (HF/Releases) + المؤشر الأفضل
+```
 
-**المسار الصفري — مجاني 100% بلا بطاقة بنكية ولا تجارب مؤقتة:** البقاء على سلسلة APIs المجانية المُثبتة إنتاجيًا كما هي، مع بناء الأصول المملوكة فوقها عبر المواقع المجانية الدائمة (GitHub Actions بلا حد · Kaggle 30 GPU-س/أسبوع · HF Space ‏CPU): **معرفة وذاكرة مملوكتان فورًا (ملفات git + pgvector/Vectorize + تضمين bge-m3 مجاني) ← أول نموذج مملوك بـQLoRA مجانًا ← خدمته ذاتيًا مجانًا للمهام الدفعية ← توسع متدرج بوابة تعادل موثقة ← نقل بين الاستضافات بلا إعادة تصميم.** AWS تُحمَل ولا تُوسَّع (صندوق الإنتاج 1GB عاجز عن الاستدلال — حساب موثق). التفاصيل الكاملة بحدودها ومصادرها: [`ZERO_COST_PLAN.md`](ZERO_COST_PLAN.md).
+## نقطة الانطلاق (مُقيس 2026-11-22)
+
+المشروع لا يبدأ من فراغ — أصول معرفية فعلية جاهزة للتوظيف (جُردت من مستودعات Alkemos والنسخ الاحتياطية وفحص AWS الحي اليوم):
+
+- **868 تمرينًا** ثنائي اللغة · **8,830 صنف طعام** · **7 برامج تدريبية** · **24 خطة غذائية**
+- **151 مقالًا** منشورًا (2.2MB) + **230 سجل توليد** · **169 مرجعًا غذائيًا** · دستور تحرير بـ14 جهة علمية بيضاء
+- بيئات مجانية مثبتة: **Kaggle ‏30 GPU-س/أسبوع** · **GHA بلا حد** · **HF ‏100GB تخزين خاص** · **GitHub Releases ≤2GB/ملف** — بلا بطاقة بنكية
+- **AWS:** مثيل الإنتاج يعمل بتكلفة **$0** (مُقيس سبتمبر–نوفمبر) — يُحمَل ولا يُوسَّع (ADR-0010)
 
 ## الحوكمة
 
 - **المالك:** أحمد (`muscleshubfit@gmail.com`) — كل قرار تنفيذي يمس الإنتاج أو الميزانية يحتاج موافقته الموثقة.
-- مسموح في هذا المستودع: البحث، التخطيط، التوثيق، الفحص القرائي للإنتاج.
-- ممنوع دون موافقة مستقلة: تعديل كود Alkemos، تغيير مزودي الإنتاج، تعديل الخوادم/القواعد، الشراء أو تفعيل اشتراكات، تدريب مكلف، أي خدمة تتطلب بطاقة بنكية. القائمة الكاملة في `docs/00-foundation/FOUNDATION_INSTRUCTIONS.md` §3.
-- **لا أسرار هنا أبدًا** — انظر `SECURITY.md` (نافذة بصرامة مضاعفة بعد علانية المستودع).
+- **الحالة الحالية:** المشروع تخطيطي/توثيقي — **لا تنفيذ قبل اعتماد الخطة v2.0 (قرار D-11)**.
+- مسموح: البحث، التخطيط، التوثيق، الفحص القرائي للإنتاج. ممنوع دون موافقة مستقلة: تعديل كود Alkemos أو مزوديه أو خوادمه، الشراء أو الاشتراكات، أي خدمة تتطلب بطاقة بنكية، بدء التدريب.
+- **لا أسرار هنا أبدًا** — انظر `SECURITY.md`.
 
 ## كيف تعمل أي جلسة جديدة؟
 
 1. اقرأ `STATE.md` (الحالة والقرارات المعلقة).
-2. اقرأ ملف المرحلة ذات الصلة من `docs/`.
-3. التزم بـ `docs/00-foundation/FOUNDATION_INSTRUCTIONS.md` (المنهجية والمصادر والتوثيق).
-4. عند إنجاز أي دفعة: حدّث `STATE.md` + سجّل القرار + commit/push إلى `main`.
+2. اقرأ `PLAN.md` (الخطة المعتمدة/المعروضة) وملف المرحلة ذات الصلة.
+3. عند إنجاز أي دفعة: حدّث `STATE.md` + سجّل القرار (ADR عند الحاجة) + commit/push إلى `main`.
 
 </div>
 
@@ -59,10 +63,8 @@
 
 # AlkemosAI (English)
 
-**What this repository is:** the permanent home of the AlkemosAI project — a **public** (owner directive 2026-11-22, ADR-0006) planning-and-research repository for building a fully-owned AI system (weights, code, data, memory, knowledge) for fitness, nutrition and health in Arabic and English, portable across hosts, progressing toward zero permanent dependency on external model providers.
+**What this repository is:** the permanent home of the AlkemosAI project after its owner-directed redefinition (2026-11-22): a **standalone project building an owned AI model that learns and accumulates** — specialized in fitness, nutrition and sports science (Arabic/English), built on open-weight models under ownership-friendly licenses (Apache-2.0/MIT only), trained **in gated batches** with no continuous serving, no permanent inference server and no always-on GPU. Everything the model learns (knowledge, data, memory, weights, learning logs) lives in **owned, portable files and assets** transferable between hosts.
 
-**Starting point (baseline, 2026-11-22):** the existing Alkemos production repo was examined in full (code-level, read-only). Verified: a unified-ish AI layer (5 generation providers + 2 search providers, all free-tier), a battle-tested central router with one-env-var rollback, quota/cooldown/metering systems, and an AWS Lightsail + Supabase + GitHub Actions production stack at ~$0/month. The core gap: **zero model ownership** — total existential dependency on external APIs. Full details: [`ALKEMOS_BASELINE.md`](ALKEMOS_BASELINE.md).
+**Explicit non-goals (ADR-0007):** not run to serve users; not a replacement for (or modification of) Alkemos's current AI system; never touches Alkemos production, servers, databases or providers; not an API-aggregation facade.
 
-**Active approved track (owner directive 2026-11-22): the ZERO-COST track** — keep the proven free-tier API chain as-is, and build owned assets on top using permanently-free, no-card venues (GitHub Actions unlimited on public repos · Kaggle 30 GPU-h/week · HF Space CPU 16GB): owned knowledge/memory first (git files + pgvector/Vectorize + free multilingual bge-m3 embeddings) → first owned model via free QLoRA → free self-hosted serving for batch tasks → gated expansion → portable across hosts with zero redesign. AWS stays untouched (the 1GB production box is structurally unable to host inference — documented). Full details, limits and sources: [`ZERO_COST_PLAN.md`](ZERO_COST_PLAN.md).
-
-**Governance:** owner Ahmed (`muscleshubfit@gmail.com`) approves every production-affecting or budget-affecting decision. This repo holds research, plans and documentation only. No secrets, ever (`SECURITY.md`). New sessions start at `STATE.md`, follow `docs/00-foundation/FOUNDATION_INSTRUCTIONS.md`, and always end with `STATE.md` refreshed and work committed to `main`.
+**Status:** planning/documentation phase — the v2.0 plan (`PLAN.md`) awaits owner approval (decision D-11) before any execution begins. **Governance:** owner Ahmed approves every production- or budget-affecting decision; no secrets ever (`SECURITY.md`); new sessions start at `STATE.md`.

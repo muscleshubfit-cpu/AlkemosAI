@@ -72,3 +72,18 @@
 - أي مصدر جديد يضاف بصف جديد بنفس النمط (مع تاريخ اطلاعه الخاص إن اختلف).
 - المصدر «المُقاس داخليًا» يُحال لملفه لا يُكرر.
 - المصادر المدفوعة/غير الرسمية لا تُعتمد للاسعار النهائية — تُستخدم كإشارات فرز فقط.
+
+## 6. تحقق دفعة 3 — إعادة التعريف (كله 2026-11-22)
+
+| المصدر | ما يؤكده |
+|---|---|
+| https://www.kaggle.com/docs/efficient-gpu-usage (اطلاع 2026-11-22) | حصة Kaggle المجانية: **30 ساعة GPU/أسبوع تتجدد أسبوعيًا** (T4×2/P100)، جلسات حتى ~12 ساعة — بلا بطاقة |
+| https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github + توثيق مجتمعي متطابق (اطلاع 2026-11-22) | رفض git للملفات >100MB؛ **أصول GitHub Releases حتى 2GB للملف** — أساس مرآة الأوزان (ADR-0009) |
+| https://huggingface.co/pricing (اطلاع 2026-11-22) | الحساب المجاني يشمل **100GB تخزين خاص** (‏PRO ‏1TB) — بلا بطاقة؛ أساس التخزين الأول للأوزان |
+| https://developers.cloudflare.com/r2/ + نقاشات مجتمع Cloudflare الرسمية (اطلاع 2026-11-22) | **R2 يتطلب طريقة دفع حتى للطبقة المجانية** — أساس استبعاده (شرط «لا بطاقة») |
+| https://allenai.org/blog/olmo3 + https://allenai.org/olmo (اطلاع 2026-11-22) | **OLMo 3** (‏7B/32B): مفتوح بالكامل — أوزان + بيانات + كود + تقارير (خيار «الانفتاح الكامل» في القائمة القصيرة) |
+| https://huggingface.co/Qwen/Qwen3.5-35B-A3B/blob/main/LICENSE + صفحات عائلة Qwen3.5 | رخصة عائلة **Qwen3.5 ‏Apache-2.0** من نص الرخصة الرسمي (تحقق ملف لا وصف) |
+| https://aws.amazon.com/free/free-tier-faqs (اطلاع 2026-11-22) | الحسابات الجديدة: رصيد $100 عند التسجيل + حتى $100 استكشافيًا؛ نظام التجربة 12-شهرًا أُلغي للحسابات الجديدة — سياق قاعدة «AWS تُحمَل ولا تُوسَّع» |
+| فحص حي قراءة-فقط عبر boto3 (هوية `alkemos_aws_api`) — 2026-11-22 | مثيل Lightsail `alkemos-test` يعمل (micro_3_0، ‏1GB RAM)؛ التكاليف سبتمبر–نوفمبر **$0.00** — ضمن رصيد $100 حتى 2027-04-09 [مُقيس] |
+| لقطة النسخة الاحتياطية 2026-11-21 (`musclehubeg-backups/snapshots/manifest.json` — قراءة محلية بلا أي PII) | جرد المحتوى الحي: **blog_posts ‏151 صفًا (2.2MB)** · blog_generation_queue ‏230 (6.9MB) · nutrient_reference ‏169 · recipes ‏12 + 140 مكوّنًا · evo_nutrition_patterns ‏9 [مُقيس] |
+| استكشاف قرائي لمستودعات `muscleshubfit-cpu` (alkemos · alkemos-aws · alkemos-authority-engine · musclehubeg-backups · free-exercise-db) — 2026-11-22 | أصول المعرفة: **868 تمرينًا** ثنائي اللغة (الأصل المنبع free-exercise-db بترخيص **Unlicense/ملك عام**) · **8,830 صنف طعام** · 7 برامج · 24 خطة · دستور تحرير بـ14 جهة علمية بيضاء · برومبتات EVO/الخطط/الأدوات العشرة [مُقيس من الكود] |
