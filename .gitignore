@@ -22,5 +22,8 @@ checkpoints/
 data/raw/
 *.csv.tmp
 
+# M1 builder source cache (fetched read-only from the primary source)
+scripts/.source-cache/
+
 # Node (if tooling is added later)
 node_modules/

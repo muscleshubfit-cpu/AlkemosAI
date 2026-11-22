@@ -14,7 +14,7 @@
 
 | الملف | الغرض |
 |---|---|
-| [`PLAN.md`](PLAN.md) | **الخطة المعمارية والتنفيذية v2.1.2** — أربع طبقات + منظومتا دخول + مسارات M + C + بوابة T1. **معتمدة بقرار D-11 (2026-11-21 UTC) — التنفيذ بدأ: M1 + C1 نشطان (دفعة 6)** |
+| [`PLAN.md`](PLAN.md) | **الخطة المعمارية والتنفيذية v2.1.2** — أربع طبقات + منظومتا دخول + مسارات M + C + بوابة T1. **معتمدة بقرار D-11 (2026-11-21 UTC) — التنفيذ جارٍ: M1 (أول ملفات sft + البطارية — دفعة 8) + C1 نشط** |
 | [`STATE.md`](STATE.md) | **أول ملف تقرؤه في أي جلسة** — الحالة الحية والقرارات المعلقة |
 | [`VISION.md`](VISION.md) | الرؤية، أعمدة الملكية (11)، سلّما النمو A0–A5 والاستقلالية Aut0–Aut3 |
 | [`MASTER_ROADMAP.md`](MASTER_ROADMAP.md) | خارطة الطريق: المسارات M/C والبوابات والختم T1 |
@@ -48,7 +48,7 @@ research/     خط الدخول: مراقب المصدر الأساسي (alkemos
 ## الحوكمة
 
 - **المالك:** أحمد (`muscleshubfit@gmail.com`) — كل قرار تنفيذي يمس الإنتاج أو الميزانية يحتاج موافقته الموثقة.
-- **الحالة الحالية (دفعة 7):** التنفيذ بدأ بأمر المالك (**D-11 صدر 2026-11-21 UTC**): M1 نشطة (نواة المعرفة والذاكرة v0) وC1 نشط (مراقب قراءة-فقط كل 6 ساعات UTC) — **حُصّن بدفعة 7 بقانون عدم الفقد** (لا يفقد أي التزام عند تجاوز حدود 20/50، والمؤشر لا يتقدم فوق غير المعالج — التفاصيل في `research/README`) مع تصحيح حالة اعتماد D-11 في كل الوثائق. **لا تدريب أوزان بدأ** (بعد M1 وقياس M2) ولا نموذج شُغل ولا أي التزام مالي أُنشئ ولا مساس بإنتاج Alkemos.
+- **الحالة الحالية (دفعة 8):** التنفيذ جارٍ بأمر المالك (**D-11 صدر 2026-11-21 UTC**): M1 نشطة — **أول ملفات بيانات أُنتجت بدفعة 8** (`sft-exercises-ar/en.jsonl` ‏2,604 لكل لغة · `sft-foods-ar.jsonl` ‏8,162 · `sft-programs.jsonl` ‏62) + **بطارية التقييم مكتملة** (`alkemos-eval-v0.jsonl` — 162 حالة منها 87 حرجة، كل قيمة رقمية محسوبة بالكود) بمولّد حتمي قابل لإعادة الإنتاج؛ وC1 نشط (مراقب قراءة-فقط كل 6 ساعات UTC — حُصّن بقانون عدم الفقد بدفعة 7). **لا تدريب أوزان بدأ** (بعد M1 وقياس M2) ولا نموذج شُغل ولا أي التزام مالي أُنشئ ولا مساس بإنتاج Alkemos.
 - مسموح: البحث والتخطيط والتوثيق والفحص/الرصد القرائي قراءة-فقط. ممنوع دون موافقة مستقلة: تعديل كود Alkemos أو مزوديه أو خوادمه (أو إنتاجه ولو لتحسين SEO)، الشراء أو الاشتراكات، بدء التدريب.
 - **قانون التوقيت (ADR-0013):** كل طابع مخزن UTC (ISO-8601 بلاحقة Z)؛ المحلي يوثق بإزاحته (المالك: Africa/Cairo).
 - **العلنية مؤقتة للمراجعة** (ADR-0019): قاعدة «لا يوضع في العلني ما لا يصح بقاؤه عامًا أبدًا» — والتحول إلى خاص عند الاكتمال بقرار D-14.
@@ -70,4 +70,4 @@ research/     خط الدخول: مراقب المصدر الأساسي (alkemos
 
 **Explicit non-goals (ADR-0007):** never run to serve users; never replace or modify Alkemos's current AI system; never touch Alkemos production, servers, databases or providers (including production SEO changes — the expertise track produces recommendations only); not an API-aggregation facade. **The repository is public temporarily for review only and converts to private at project completion (ADR-0019 / decision D-14).**
 
-**Status (batch 7):** execution started by owner order (**D-11 granted 2026-11-21 UTC**): M1 (knowledge core + memory v0) and C1 (read-only source watcher, every 6h UTC) are active. Batch 7 hardened C1 with the **no-loss law** (no commit is ever dropped past the 20/50 limits; the cursor only advances past fully-processed commits — see `research/README`) and fixed the D-11 approval-status contradictions across all docs. No weights training yet (that follows M1 + M2 measurement); no model served; no financial commitment created; Alkemos production untouched. **Time law (ADR-0013):** all stored timestamps are UTC (ISO-8601, `Z` suffix); local times documented with their offset. **Governance:** owner Ahmed approves every production- or budget-affecting decision; no secrets ever (`SECURITY.md`); new sessions start at `STATE.md`.
+**Status (batch 8):** execution ongoing by owner order (**D-11 granted 2026-11-21 UTC**): M1 active — **first dataset files produced in batch 8** (`sft-exercises-ar/en.jsonl`, 2,604 records each · `sft-foods-ar.jsonl`, 8,162 · `sft-programs.jsonl`, 62) plus the **completed evaluation battery** (`alkemos-eval-v0.jsonl` — 162 cases, 87 critical, every numeric expected value computed in code), all via a deterministic, reproducible builder; C1 active (read-only source watcher every 6h UTC, hardened with the no-loss law in batch 7). No weights training yet (that follows M1 + M2 measurement); no model served; no financial commitment created; Alkemos production untouched. **Time law (ADR-0013):** all stored timestamps are UTC (ISO-8601, `Z` suffix); local times documented with their offset. **Governance:** owner Ahmed approves every production- or budget-affecting decision; no secrets ever (`SECURITY.md`); new sessions start at `STATE.md`.
