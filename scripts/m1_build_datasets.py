@@ -30,13 +30,21 @@ m1_build_datasets.py — مولّد بيانات M1 (دفعة 8 — 2026-11-22 U
     SHA يطابق SOURCE_SHA حرفيًا (الصيغة القصيرة 7 محرف أو الكاملة 40 —
     لا يكفي أن يكون سداسيًا سليم الشكل) ومسارًا داخل SOURCE_FILES
     المجلوبة فعلًا في نفس التشغيل.
+  - كاش المصدر مربوط بالـSHA المثبّت (مراجعة دفعة 9، بأمر المالك):
+    الكاش لا يُقرأ أبدًا إلا إذا أثبت أنه لمحتوى الالتزام المثبّت نفسه —
+    مجلد لكل SHA كامل + بيان (_manifest.json) يحمل المستودع والـSHA وبصمة
+    sha256 لكل ملف؛ أي انحراف = تجاهل الكاش وإعادة الجلب. لا سبيل لاستخدام
+    محتوى من إصدار سابق للـSHA المثبّت عبر الكاش (التفصيل في fetch_source).
   - لا بيانات مستخدمين ولا PII إطلاقًا (SECURITY §3).
   - طوابع UTC (ADR-0013).
 
 الاستخدام:
   python3 scripts/m1_build_datasets.py [--cache DIR] [--out ROOT]
 
-  --cache DIR   مجلد كاش ملفات المصدر (الافتراضي: scripts/.source-cache)
+  --cache DIR   مجلد كاش ملفات المصدر (الافتراضي: scripts/.source-cache) —
+                مربوط بالـSHA المثبّت: مجلد فرعي لكل SHA كامل + بيان بصمات
+                sha256 لكل ملف (_manifest.json)؛ أي انحراف (ملف إصدار سابق /
+                محتوى معدول / بيان غائب) = تجاهل الكاش وإعادة الجلب من الشبكة
   --out ROOT    جذر المستودع (الافتراضي: جذر المستودع الذي يحتوي هذا الملف)
 
 الخروج: رمز غير صفري عند أي فشل تحقق (عدد/صلاحية/فصل) — لا مخرجات ناقصة.
@@ -109,22 +117,77 @@ EXPECTED = {
 }
 
 
-# ────────────────────────── جلب ملفات المصدر ──────────────────────────
+# ────────────────────────── جلب ملفات المصدر (كاش مربوط بالـSHA المثبّت) ──────────────────────────
+
+# اسم بيان الكاش داخل مجلد الـSHA: {repo, sha, files: {name: sha256}}
+CACHE_MANIFEST_NAME = "_manifest.json"
+
+
+def _cache_manifest_path(sha_dir: str) -> str:
+    return os.path.join(sha_dir, CACHE_MANIFEST_NAME)
+
+
+def _load_cache_manifest(sha_dir: str):
+    """قراءة بيان الكاش — يعود None عند أي غياب/تلف/انحراف عن المثبّت."""
+    try:
+        with open(_cache_manifest_path(sha_dir), encoding="utf-8") as f:
+            m = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(m, dict) or m.get("repo") != SOURCE_REPO
+            or m.get("sha") != SOURCE_SHA or not isinstance(m.get("files"), dict)):
+        return None
+    return m
+
+
+def _save_cache_manifest(sha_dir: str, manifest, cache_name: str, data: str) -> None:
+    """كتابة/تحديث بيان الكاش بعد جلب ملف (يتجاهل أي بيان سابق غير سليم)."""
+    m = manifest if isinstance(manifest, dict) else {}
+    m["repo"] = SOURCE_REPO
+    m["sha"] = SOURCE_SHA
+    m.setdefault("files", {})[cache_name] = hashlib.sha256(data.encode("utf-8")).hexdigest()
+    with open(_cache_manifest_path(sha_dir), "w", encoding="utf-8") as f:
+        json.dump(m, f, ensure_ascii=False, sort_keys=True, indent=1)
+
 
 def fetch_source(path: str, cache_dir: str) -> str:
-    """جلب ملف مصدر من raw.githubusercontent (بلا مفاتيح) مع كاش محلي."""
+    """جلب ملف مصدر من raw.githubusercontent (بلا مفاتيح) عبر كاش مربوط بالـSHA المثبّت.
+
+    قانون الكاش (مراجعة دفعة 9، بأمر المالك): الكاش لا يُقرأ أبدًا إلا إذا
+    أثبت أنه لمحتوى الالتزام المثبّت نفسه — طبقتان:
+      1. فصل الإصدارات بالمسار: كل ملف يعيش في مجلد الـSHA الكامل
+         (cache_dir/<SOURCE_SHA>/) — إعادة تثبيت SHA جديد تعني مجلدًا جديدًا؛
+         ملفات الإصدار السابق (بأي تخطيط قديم أو SHA آخر) لا تُقرأ أبدًا.
+      2. إثبات المحتوى: بيان (_manifest.json) داخل المجلد يحمل المستودع
+         والـSHA المثبّت وبصمة sha256 لكل ملف — الملف لا يُستخدم من الكاش إلا
+         إذا طابقت بصمته البيان؛ محتوى معدول/تالف أو بيان غائب/تالف = تجاهل
+         الكاش وإعادة الجلب من الشبكة ثم إعادة كتابة الكاش والبيان.
+    النتيجة: أي انحراف يجعل الشبكة (على الـSHA المثبّت) هي المرجع دائمًا —
+    لا سبيل لاستخدام محتوى من إصدار سابق عبر الكاش. (نطاق الضمان: التقادم
+    والتلف العرضي؛ التزوير المتعمد للبيان والمحتوى معًا خارج نطاق التهديد —
+    من يملك الكتابة على المستودع المحلي يملك تعديل السكربت نفسه أصلًا.)
+    """
     cache_name = path.replace("/", "__")
-    cache_path = os.path.join(cache_dir, cache_name)
-    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
-        with open(cache_path, "r", encoding="utf-8") as f:
-            return f.read()
+    sha_dir = os.path.join(cache_dir, SOURCE_SHA)
+    cache_path = os.path.join(sha_dir, cache_name)
+    manifest = _load_cache_manifest(sha_dir)
+    if manifest is not None:
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cached = f.read()
+        except OSError:
+            cached = ""
+        if cached and manifest["files"].get(cache_name) == hashlib.sha256(
+                cached.encode("utf-8")).hexdigest():
+            return cached  # مثبّت: بصمة مطابقة داخل مجلد الـSHA الصحيح
     url = f"{RAW_BASE}/{path}"
     req = urllib.request.Request(url, headers={"User-Agent": "alkemosAI-m1-builder"})
     with urllib.request.urlopen(req) as r:
         data = r.read().decode("utf-8")
-    os.makedirs(cache_dir, exist_ok=True)
+    os.makedirs(sha_dir, exist_ok=True)
     with open(cache_path, "w", encoding="utf-8") as f:
         f.write(data)
+    _save_cache_manifest(sha_dir, manifest, cache_name, data)
     return data
 
 

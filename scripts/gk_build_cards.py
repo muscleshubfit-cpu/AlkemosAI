@@ -22,8 +22,12 @@
          تشغيل بنفس المحتوى = إعادة كتابة حتمية مسموحة (عقد إعادة البناء).
        - ثنائية اللغة: حقائق عربية ≥3 أسطر (بها محرف عربي) + إنجليزية ≥2
          (غالبية لاتينية) + مصطلحات مفتاحية إنجليزية حاضرة في الحقائق.
-       - الاستشهاد: كل مسار في سطر source داخل الملفات المجلوبة فعلًا +
-         SHA مطابق لـSOURCE_SHA + تاريخ اطلاع UTC.
+       - الاستشهاد (تحقق فعلي في نص كل بطاقة — الجديدة والمعتمدة القائمة
+         على القرص معًا؛ مراجعة دفعة 9 بأمر المالك): وسم SHA في سطر
+         source يطابق SOURCE_SHA حرفيًا (7 أو 40 محرفًا — أي SHA آخر
+         وإن كان سليم الشكل = رفض) + بصمة SHA الكاملة في قسم الأصل +
+         تاريخ اطلاع يطابق ACCESS_UTC + تاريخ مراجعة متسق مع توقيع
+         G-K + كل مسار داخل الملفات المجلوبة فعلًا.
        - الحقول: المعرفات فردية متسلسلة، الحالة «معتمدة»، approved_via
          بتوقيع G-K بتاريخ UTC، contradicts فارغة (لا تعارض).
   5. يكتب البطاقات إلى memory/cards/ ويطبع تقرير البوابة الموقع (الأعداد
@@ -38,6 +42,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import os
 import re
@@ -48,6 +53,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m1_build_datasets import (  # noqa: E402
     ACCESS_UTC,
     SOURCE_FILES,
+    SOURCE_REPO,
     SOURCE_SHA,
     SRC_TAG,
     collect_source_rules,
@@ -542,7 +548,11 @@ def render_card(num: int, spec: dict) -> str:
 
 
 def load_existing_cards(cards_dir: str) -> list:
-    """قراءة البطاقات القائمة (id/entity/بصمة القيم) — أساس فحص التعارض."""
+    """قراءة البطاقات القائمة (id/entity/الحالة/بصمة القيم/النص الكامل).
+
+    النص الكامل أساس تحقق البوابة الفعلي من SHA المصدر وتاريخ الاطلاع
+    في كل بطاقة معتمدة قائمة (مراجعة دفعة 9) — لا يُفترض سليمًا بل يُفحص.
+    """
     existing = []
     if not os.path.isdir(cards_dir):
         return existing
@@ -570,6 +580,7 @@ def load_existing_cards(cards_dir: str) -> list:
             "id": field("id"),
             "entity": field("entity"),
             "status": field("status"),
+            "text": text,
             "fingerprint": hashlib.sha256(
                 "".join(sorted(facts.split())).encode("utf-8")).hexdigest(),
         })
@@ -581,9 +592,93 @@ def fingerprint_of(spec: dict) -> str:
     return hashlib.sha256("".join(sorted(facts.split())).encode("utf-8")).hexdigest()
 
 
-def gate_checks(cards: list, existing: list, fetched_paths: set) -> list:
-    """فحوص البوابة الخمسة — تعرض قائمة أخطاء (فارغة = قبول)."""
+def verify_card_text(cid: str, text: str) -> list:
+    """فحص SHA المصدر وتاريخ الاطلاع في نص بطاقة (مراجعة دفعة 9 — بأمر المالك).
+
+    تُستخدم للبطاقات الجديدة (النص الذي سيُكتب) والبطاقات المعتمدة القائمة
+    على القرص على حد سواء — البوابة لا تفترض سلامة التثبيت بل تتحقق منه:
+      1. وسم المصدر في سطر source «<مستودع>@<SHA>:» — المستودع هو alkemos-aws
+         والـSHA يطابق SOURCE_SHA حرفيًا (الصورة القصيرة 7 محارف أو الكاملة
+         40)؛ أي SHA آخر — وإن كان سداسيًا سليم الشكل، من إصدار سابق أو
+         مزيفًا — يُرفض.
+      2. تاريخ الاطلاع «اطلاع <YYYY-MM-DD> (UTC)» في سطر source يطابق
+         ACCESS_UTC حرفيًا (وصيغة تقويمية صالحة).
+      3. بصمة SHA الكاملة (40 محرفًا) حاضرة في قسم الأصل (provenance).
+      4. last_reviewed بتاريخ UTC صالح + توقيع approved_via بصيغة
+         «G-K <YYYY-MM-DD> (UTC)» + الاتساق بينهما (كلاهما يُكتب من
+         GATE_UTC في المولّد الحتمي — تنافرهما علامة تحريف).
+    """
+    errs = []
+    m = re.search(r"^source:\s*(.+)$", text, re.M)
+    if not m:
+        return [f"[استشهاد] {cid}: لا سطر source في البطاقة"]
+    src_line = m.group(1).strip()
+
+    # (1) وسم SHA المصدر
+    repo_short = SOURCE_REPO.split("/")[-1]
+    mtag = re.match(r"^([A-Za-z0-9_.\-]+)@([0-9a-f]{7}|[0-9a-f]{40}):", src_line)
+    if not mtag:
+        errs.append(f"[استشهاد] {cid}: سطر source بلا وسم مصدر صالح "
+                    f"({repo_short}@<SHA سداسي 7 أو 40 محرفًا>): {src_line[:60]}")
+    else:
+        repo, sha = mtag.group(1), mtag.group(2)
+        if repo != repo_short:
+            errs.append(f"[استشهاد] {cid}: مستودع المصدر غير صحيح: {repo} "
+                        f"(المثبّت: {repo_short})")
+        if sha not in (SOURCE_SHA[:7], SOURCE_SHA):
+            errs.append(f"[استشهاد] {cid}: SHA المصدر لا يطابق المثبّت — وجد "
+                        f"{repo}@{sha} والمثبّت {SRC_TAG} (أو الصورة الكاملة "
+                        f"{SOURCE_SHA})")
+
+    # (2) تاريخ الاطلاع
+    mdate = re.search(r"اطلاع (\d{4}-\d{2}-\d{2}) \(UTC\)", src_line)
+    if not mdate:
+        errs.append(f"[استشهاد] {cid}: سطر source بلا تاريخ اطلاع UTC صالح "
+                    "(«— اطلاع YYYY-MM-DD (UTC)»)")
+    else:
+        d = mdate.group(1)
+        try:
+            datetime.date.fromisoformat(d)
+        except ValueError:
+            errs.append(f"[استشهاد] {cid}: تاريخ الاطلاع ليس تاريخًا تقويميًا صالحًا: {d}")
+        if d != ACCESS_UTC:
+            errs.append(f"[استشهاد] {cid}: تاريخ الاطلاع غير صحيح — وجد {d} "
+                        f"والمثبّت {ACCESS_UTC} (UTC)")
+
+    # (3) بصمة SHA الكاملة في قسم الأصل
+    if SOURCE_SHA not in text:
+        errs.append(f"[استشهاد] {cid}: بصمة SHA الكاملة للمصدر ({SOURCE_SHA}) "
+                    "غائبة عن قسم الأصل (provenance)")
+
+    # (4) تاريخ المراجعة وتوقيع البوابة
+    mlr = re.search(r"^last_reviewed:\s*(\d{4}-\d{2}-\d{2}) \(UTC\)\s*$", text, re.M)
+    mav = re.search(r"^approved_via:\s*G-K (\d{4}-\d{2}-\d{2}) \(UTC\)\s*$", text, re.M)
+    if not mlr:
+        errs.append(f"[استشهاد] {cid}: بلا last_reviewed بصيغة «YYYY-MM-DD (UTC)»")
+    if not mav:
+        errs.append(f"[استشهاد] {cid}: بلا توقيع بوابة بصيغة «G-K YYYY-MM-DD (UTC)» "
+                    "— لا اعتماد إلا عبر البوابة (cards/README ق1)")
+    if mlr and mav and mlr.group(1) != mav.group(1):
+        errs.append(f"[استشهاد] {cid}: last_reviewed ({mlr.group(1)}) لا يطابق تاريخ "
+                    f"توقيع approved_via ({mav.group(1)})")
+    return errs
+
+
+def gate_checks(cards: list, existing: list, fetched_paths: set,
+                rendered: list = None) -> list:
+    """فحوص البوابة — تعرض قائمة أخطاء (فارغة = قبول).
+
+    rendered: نصوص البطاقات التي ستُكتب (واحد لكل بطاقة بالترتيب)؛
+    تُفحص فيها البوابة فعليًا SHA المصدر وتاريخ الاطلاع والمراجعة
+    (مراجعة دفعة 9) — وإن لم تُمرر وُلّدت بـ render_card نفسها.
+    """
     errors = []
+    if rendered is None:
+        rendered = [render_card(i, spec) for i, spec in enumerate(cards, start=1)]
+    if len(rendered) != len(cards):
+        errors.append(f"[أعداد] نصوص البطاقات ({len(rendered)}) لا تطابق عدد "
+                      f"البطاقات ({len(cards)}) — لا كتابة قبل اكتمال الفحص")
+        return errors
 
     # (1) التعارض (ADR-0017 ق2): كيان/حقل — لا كتابة صامتة فوق معرفة قائمة
     by_entity = {}
@@ -627,7 +722,8 @@ def gate_checks(cards: list, existing: list, fetched_paths: set) -> list:
             if term not in en_blob:
                 errors.append(f"[ثنائي] {cid}: المصطلح المفتاحي غائب عن الإنجليزية: {term}")
 
-    # (3) الاستشهاد: مسار داخل الملفات المجلوبة + تاريخ اطلاع UTC
+    # (3) الاستشهاد: مسار داخل الملفات المجلوبة + تحقق فعلي من SHA المصدر
+    #     وتاريخ الاطلاع في نص كل بطاقة (جديدة كانت أم معتمدة قائمة)
     for i, spec in enumerate(cards, start=1):
         cid = card_id(i)
         for p in spec["sources"]:
@@ -635,6 +731,19 @@ def gate_checks(cards: list, existing: list, fetched_paths: set) -> list:
                 errors.append(f"[استشهاد] {cid}: مسار غير مجلوب فعلًا: {p}")
         if not spec.get("cited"):
             errors.append(f"[استشهاد] {cid}: بند «ما استُشهد به» فارغ")
+        errors.extend(verify_card_text(cid, rendered[i - 1]))
+    # البطاقات المعتمدة القائمة على القرص — القانون نفسه (لا بطاقة تفلت):
+    # المسودة/المشطوبة لا اعتماد لها فلا يُفحص تثبيتها؛ المعتمدة لا تُقبل
+    # إلا إذا أثبت نصها SHA المصدر المثبّت وتاريخ الاطلاع الصحيح.
+    for ex in existing:
+        exid = ex.get("id") or ex.get("file") or "بطاقة قائمة"
+        if ex.get("status") != "معتمدة":
+            continue
+        if not ex.get("text"):
+            errors.append(f"[استشهاد] {exid}: بطاقة معتمدة بلا نص متاح للتحقق "
+                          "(SHA المصدر/تاريخ الاطلاع) — لا يُفترض سليمًا")
+            continue
+        errors.extend(verify_card_text(exid, ex["text"]))
 
     # (4) الحقول والمعرفات: فردية، متسلسلة، معتمدة، موقعة
     if len(cards) != EXPECTED_CARDS:
@@ -686,22 +795,26 @@ def main() -> int:
     print("[3/5] بناء بطاقات العينة…")
     cards = build_card_specs(rules)
     existing = load_existing_cards(cards_dir)
+    # النصوص تُولَّد أولًا ثم تفحصها البوابة ثم تُكتب كما فُحصت حرفيًا —
+    # بلا فجوة بين ما يُفحص وما يُكتب على القرص (مراجعة دفعة 9)
+    rendered = [render_card(i, spec) for i, spec in enumerate(cards, start=1)]
 
-    print(f"[4/5] فحوص بوابة G-K (تعارض/ثنائية لغة/استشهاد/حقول) — "
-          f"القائمة قبل الدورة: {len(existing)} بطاقة…")
-    errors = gate_checks(cards, existing, set(CARD_SOURCE_FILES))
+    n_ex_approved = sum(1 for ex in existing if ex.get("status") == "معتمدة")
+    print(f"[4/5] فحوص بوابة G-K (تعارض/ثنائية لغة/استشهاد SHA+تاريخ/حقول) — "
+          f"القائمة قبل الدورة: {len(existing)} بطاقة ({n_ex_approved} معتمدة)…")
+    errors = gate_checks(cards, existing, set(CARD_SOURCE_FILES), rendered)
     if errors:
         print("\nفشل بوابة G-K — لا اعتماد:")
         for e in errors:
             print("  -", e)
         return 1
 
-    print("[5/5] كتابة البطاقات المعتمدة…")
+    print("[5/5] كتابة البطاقات المعتمدة (النصوص نفسها التي فحصتها البوابة)…")
     os.makedirs(cards_dir, exist_ok=True)
-    for i, spec in enumerate(cards, start=1):
+    for i, (spec, card_text) in enumerate(zip(cards, rendered), start=1):
         path = os.path.join(cards_dir, f"{card_id(i)}-{spec['slug']}.md")
         with open(path, "w", encoding="utf-8") as f:
-            f.write(render_card(i, spec))
+            f.write(card_text)
         print(f"      {card_id(i)}-{spec['slug']}.md — sha256={sha256_file(path)[:12]}")
 
     n_ar = sum(len(c["facts_ar"]) for c in cards)
@@ -724,7 +837,9 @@ def main() -> int:
     آليًا من {len(CARD_SOURCE_FILES)} ملف مصدر @ {SOURCE_SHA[:7]} (تثبيتات M1 + {14} تثبيتًا إضافيًا للدورة)
   - فحص التعارض: {len(existing)} بطاقة قائمة + {len(cards)} كيانًا فريدًا ← صفر تعارض وصفر تكرار
   - فحص ثنائية اللغة: عربي ≥3 أسطر وبطاقة إنجليزية ≥2 أسطر + مصطلحات مفتاحية — {len(cards)}/{len(cards)}
-  - الاستشهاد: كل مسار داخل الملفات المجلوبة فعلًا + SHA مطابق لـSOURCE_SHA + اطلاع {ACCESS_UTC} (UTC)
+  - الاستشهاد: كل مسار داخل الملفات المجلوبة فعلًا + تحقق فعلي في نص كل بطاقة —
+    الجديدة {len(rendered)} والمعتمدة القائمة {n_ex_approved}: SHA يطابق SOURCE_SHA واطلاع
+    {ACCESS_UTC} (UTC) وتوقيع G-K متسق مع تاريخ المراجعة
   - الحتمية: إعادة التشغيل تعيد إنتاج الملفات أنفسها (عقد إعادة البناء)""")
     return 0
 
