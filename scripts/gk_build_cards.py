@@ -23,11 +23,14 @@
        - ثنائية اللغة: حقائق عربية ≥3 أسطر (بها محرف عربي) + إنجليزية ≥2
          (غالبية لاتينية) + مصطلحات مفتاحية إنجليزية حاضرة في الحقائق.
        - الاستشهاد (تحقق فعلي في نص كل بطاقة — الجديدة والمعتمدة القائمة
-         على القرص معًا؛ مراجعة دفعة 9 بأمر المالك): وسم SHA في سطر
-         source يطابق SOURCE_SHA حرفيًا (7 أو 40 محرفًا — أي SHA آخر
-         وإن كان سليم الشكل = رفض) + بصمة SHA الكاملة في قسم الأصل +
-         تاريخ اطلاع يطابق ACCESS_UTC + تاريخ مراجعة متسق مع توقيع
-         G-K + كل مسار داخل الملفات المجلوبة فعلًا.
+         على القرص معًا؛ مراجعة دفعة 9 بأمر المالك وتتمتها): وسم SHA في
+         سطر source يطابق SOURCE_SHA حرفيًا (7 أو 40 محرفًا — أي SHA آخر
+         وإن كان سليم الشكل = رفض) + بصمة SHA الكاملة داخل قسم الأصل
+         (provenance) تحديدًا — لا أي موضع آخر من البطاقة + تاريخ اطلاع
+         يطابق ACCESS_UTC + التحقق التقويمي الفعلي (fromisoformat) يشمل
+         تواريخ الاطلاع وlast_reviewed وتوقيع approved_via معًا — التاريخ
+         المستحيل تقويميًا يُرفض ولو كانت صيغته سليمة — + تاريخ مراجعة
+         متسق مع توقيع G-K + كل مسار داخل الملفات المجلوبة فعلًا.
        - الحقول: المعرفات فردية متسلسلة، الحالة «معتمدة»، approved_via
          بتوقيع G-K بتاريخ UTC، contradicts فارغة (لا تعارض).
   5. يكتب البطاقات إلى memory/cards/ ويطبع تقرير البوابة الموقع (الأعداد
@@ -603,10 +606,17 @@ def verify_card_text(cid: str, text: str) -> list:
          مزيفًا — يُرفض.
       2. تاريخ الاطلاع «اطلاع <YYYY-MM-DD> (UTC)» في سطر source يطابق
          ACCESS_UTC حرفيًا (وصيغة تقويمية صالحة).
-      3. بصمة SHA الكاملة (40 محرفًا) حاضرة في قسم الأصل (provenance).
+      3. بصمة SHA الكاملة (40 محرفًا) حاضرة داخل قسم الأصل (provenance)
+         تحديدًا — القسم يمتد من ترويسته «## الأصل الكامل» حتى العنوان
+         التالي أو نهاية البطاقة؛ حضورها في أي موضع آخر (frontmatter /
+         الحقائق / EN) لا يُقبل (تتمة مراجعة دفعة 9 — بأمر المالك).
       4. last_reviewed بتاريخ UTC صالح + توقيع approved_via بصيغة
          «G-K <YYYY-MM-DD> (UTC)» + الاتساق بينهما (كلاهما يُكتب من
-         GATE_UTC في المولّد الحتمي — تنافرهما علامة تحريف).
+         GATE_UTC في المولّد الحتمي — تنافرهما علامة تحريف) — والصلاحية
+         التقويمية **فعلية** للثلاثة معًا (fromisoformat): تاريخ الاطلاع
+         وlast_reviewed وتاريخ التوقيع؛ المستحيل تقويميًا (كـ30 فبراير أو
+         شهر 13) يُرفض حتى لو كانت صيغته سليمة ومتسقًا مع نظيره (تتمة
+         مراجعة دفعة 9 — بأمر المالك).
     """
     errs = []
     m = re.search(r"^source:\s*(.+)$", text, re.M)
@@ -645,19 +655,41 @@ def verify_card_text(cid: str, text: str) -> list:
             errs.append(f"[استشهاد] {cid}: تاريخ الاطلاع غير صحيح — وجد {d} "
                         f"والمثبّت {ACCESS_UTC} (UTC)")
 
-    # (3) بصمة SHA الكاملة في قسم الأصل
-    if SOURCE_SHA not in text:
-        errs.append(f"[استشهاد] {cid}: بصمة SHA الكاملة للمصدر ({SOURCE_SHA}) "
-                    "غائبة عن قسم الأصل (provenance)")
+    # (3) بصمة SHA الكاملة داخل قسم الأصل (provenance) تحديدًا — لا موضع آخر
+    mprov = re.search(r"^##\s*الأصل الكامل[^\n]*$", text, re.M)
+    if not mprov:
+        errs.append(f"[استشهاد] {cid}: قسم الأصل (provenance) غائب من البطاقة — "
+                    "لا موضع موثق لبصمة SHA الكاملة")
+    else:
+        prov = text[mprov.end():]
+        mend = re.search(r"^##\s|^</div>\s*$", prov, re.M)
+        if mend:
+            prov = prov[:mend.start()]
+        if SOURCE_SHA not in prov:
+            errs.append(f"[استشهاد] {cid}: بصمة SHA الكاملة للمصدر ({SOURCE_SHA}) "
+                        "غائبة عن قسم الأصل (provenance) تحديدًا — حضورها في موضع "
+                        "آخر من البطاقة لا يُقبل")
 
-    # (4) تاريخ المراجعة وتوقيع البوابة
+    # (4) تاريخ المراجعة وتوقيع البوابة — صلاحية تقويمية فعلية لكل تاريخ
     mlr = re.search(r"^last_reviewed:\s*(\d{4}-\d{2}-\d{2}) \(UTC\)\s*$", text, re.M)
     mav = re.search(r"^approved_via:\s*G-K (\d{4}-\d{2}-\d{2}) \(UTC\)\s*$", text, re.M)
     if not mlr:
         errs.append(f"[استشهاد] {cid}: بلا last_reviewed بصيغة «YYYY-MM-DD (UTC)»")
+    else:
+        try:
+            datetime.date.fromisoformat(mlr.group(1))
+        except ValueError:
+            errs.append(f"[استشهاد] {cid}: last_reviewed ليس تاريخًا تقويميًا "
+                        f"صالحًا: {mlr.group(1)}")
     if not mav:
         errs.append(f"[استشهاد] {cid}: بلا توقيع بوابة بصيغة «G-K YYYY-MM-DD (UTC)» "
                     "— لا اعتماد إلا عبر البوابة (cards/README ق1)")
+    else:
+        try:
+            datetime.date.fromisoformat(mav.group(1))
+        except ValueError:
+            errs.append(f"[استشهاد] {cid}: تاريخ توقيع approved_via ليس تاريخًا "
+                        f"تقويميًا صالحًا: {mav.group(1)}")
     if mlr and mav and mlr.group(1) != mav.group(1):
         errs.append(f"[استشهاد] {cid}: last_reviewed ({mlr.group(1)}) لا يطابق تاريخ "
                     f"توقيع approved_via ({mav.group(1)})")
