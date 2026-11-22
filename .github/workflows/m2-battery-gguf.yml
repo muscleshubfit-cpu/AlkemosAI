@@ -27,7 +27,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: m2-battery-${{ github.ref }}
+  group: m2-battery-${{ inputs.model_alias }}
   cancel-in-progress: false
 
 jobs:
@@ -85,7 +85,10 @@ jobs:
             echo "no new results to commit"
           else
             git commit -m "eval(M2 آلي): نتائج بطارية ومجسات ${{ inputs.model_alias }} — عينة طبقية 36 + مجسات المدرب (سير m2-battery-gguf، بلا أسرار)"
-            git push
+            for i in 1 2 3 4 5; do
+              git pull --rebase origin main && git push && break
+              echo "push conflict — retry $i"; sleep 20
+            done
           fi
 
       - name: Upload artifacts
