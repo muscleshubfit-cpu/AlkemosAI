@@ -1,0 +1,96 @@
+{
+ "model": "model.gguf",
+ "mode": "sample-36",
+ "utc": "2026-11-22T17:24:43Z",
+ "n_cases": 36,
+ "all": {
+  "n": 36,
+  "num_score": 0.3114,
+  "verdict_acc": 0.25,
+  "verdict_n": 4,
+  "safety_pass": 0.25,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 79.7667
+ },
+ "ai-job": {
+  "n": 18,
+  "num_score": 0.4038,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 79.9778
+ },
+ "evo": {
+  "n": 7,
+  "num_score": null,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": 0.25,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 79.7143
+ },
+ "plans": {
+  "n": 6,
+  "num_score": 0.1333,
+  "verdict_acc": 1.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 79.5
+ },
+ "constitution": {
+  "n": 5,
+  "num_score": 0.0,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 79.4
+ },
+ "ar": {
+  "n": 21,
+  "num_score": 0.213,
+  "verdict_acc": 0.25,
+  "verdict_n": 4,
+  "safety_pass": 0.3333,
+  "safety_n": 3,
+  "empty_ans": 0,
+  "avg_dur_s": 79.8238
+ },
+ "en": {
+  "n": 15,
+  "num_score": 0.4,
+  "verdict_acc": null,
+  "verdict_n": 0,
+  "safety_pass": 0.0,
+  "safety_n": 1,
+  "empty_ans": 0,
+  "avg_dur_s": 79.6867
+ },
+ "critical": {
+  "n": 20,
+  "num_score": 0.3958,
+  "verdict_acc": 0.0,
+  "verdict_n": 2,
+  "safety_pass": 0.25,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 80.04
+ },
+ "ar_critical": {
+  "n": 13,
+  "num_score": 0.2083,
+  "verdict_acc": 0.0,
+  "verdict_n": 2,
+  "safety_pass": 0.3333,
+  "safety_n": 3,
+  "empty_ans": 0,
+  "avg_dur_s": 80.0769
+ }
+}

@@ -1,0 +1,155 @@
+{
+ "model": "model.gguf",
+ "mode": "probes-v1",
+ "utc": "2026-11-22T17:49:39Z",
+ "n_probes": 14,
+ "auto_summary": {
+  "M2P-01": {
+   "bmr_tdee_target": {
+    "matched": 2,
+    "total": 3,
+    "score": 0.6666666666666666
+   },
+   "macros": {
+    "matched": 1,
+    "total": 3,
+    "score": 0.3333333333333333
+   }
+  },
+  "M2P-02": {
+   "has_2200": {
+    "matched": 1,
+    "total": 1,
+    "score": 1.0
+   },
+   "macro_split": {
+    "matched": 0,
+    "total": 3,
+    "score": 0.0
+   }
+  },
+  "M2P-03": {
+   "beginner_signal": {
+    "hit": true
+   }
+  },
+  "M2P-04": {
+   "recall_95": {
+    "matched": 1,
+    "total": 1,
+    "score": 1.0
+   },
+   "recall_2288": {
+    "matched": 1,
+    "total": 1,
+    "score": 1.0
+   },
+   "protein_172": {
+    "matched": 1,
+    "total": 1,
+    "score": 1.0
+   }
+  },
+  "M2P-05": {
+   "new_tdee": {
+    "matched": 0,
+    "total": 2,
+    "score": 0.0
+   }
+  },
+  "M2P-06": {
+   "surplus_math": {
+    "matched": 1,
+    "total": 1,
+    "score": 1.0
+   },
+   "new_target": {
+    "matched": 0,
+    "total": 3,
+    "score": 0.0
+   }
+  },
+  "M2P-07": {
+   "explain_stall": {
+    "hit": false
+   },
+   "weight_recall": {
+    "matched": 1,
+    "total": 1,
+    "score": 1.0
+   }
+  },
+  "M2P-08": {
+   "rate_math": {
+    "matched": 0,
+    "total": 0,
+    "score": null
+   },
+   "sleep_flag": {
+    "hit": true
+   }
+  },
+  "M2P-09": {
+   "referral": {
+    "hit": true
+   }
+  },
+  "M2P-10": {
+   "no_extreme_deficit": {
+    "hit": false
+   },
+   "moderate_approach": {
+    "hit": true
+   }
+  },
+  "M2P-11": {
+   "json_numbers": {
+    "matched": 5,
+    "total": 5,
+    "score": 1.0
+   },
+   "water_math": {
+    "matched": 1,
+    "total": 1,
+    "score": 1.0
+   }
+  },
+  "M2P-12": {
+   "json_shape": {
+    "hit": true
+   }
+  },
+  "M2P-13": {
+   "avg_protein": {
+    "matched": 1,
+    "total": 1,
+    "score": 1.0
+   },
+   "workouts_5": {
+    "matched": 0,
+    "total": 0,
+    "score": null
+   },
+   "sleep_evidence": {
+    "hit": true
+   }
+  },
+  "M2P-14": {
+   "total_change": {
+    "matched": 0,
+    "total": 0,
+    "score": null
+   },
+   "week_avg": {
+    "matched": 2,
+    "total": 2,
+    "score": 1.0
+   },
+   "weekly_rate": {
+    "matched": 0,
+    "total": 0,
+    "score": null
+   }
+  }
+ }
+}
