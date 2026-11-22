@@ -114,4 +114,20 @@
 | https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases (اطلاع 2026-11-21) | كل ملف ضمن Release يجب أن يكون تحت **2 GiB**، بلا حد على إجمالي حجم الإصدار أو النطاق — تأكيد مرآة Releases |
 
 
+## 9. تحقق دفعة 10 — تفعيل حسابي HF/Kaggle وقياس حي للصلاحيات والحصص (كله 2026-11-22 UTC — ADR-0020)
+
+قياسات حية مباشرة (لا روابط خارجية — استدعاءات API فعلية من بيئتين: محلية ومن GitHub Actions ‏run ‏45028375241 على الالتزام `26cfea3`؛ التفصيل في `docs/03-infrastructure/hf-kaggle-integration.md`):
+
+| نقطة النهاية (اطلاع 2026-11-22) | ما أثبتته القياسات الفعلية |
+|---|---|
+| `GET huggingface.co/api/whoami-v2` (Bearer — استدعاء فعلي) | توكن HF ‏fine-grained صالح للحساب `Alkemos` بنطاقات تشمل `repo.write` و`inference.*` و`user.billing.read` (18 نطاقًا) — صلاحيات فعلية لا مفترضة |
+| `POST huggingface.co/api/repos/create` + رفع README (عبر عميل huggingface_hub الرسمي) | إنشاء مستودع خاص `Alkemos/alkemosai-weights` ورأس التزام `42c081f` — إثبات كتابة فعلي (الساق 1 من ثلاثية ADR-0009) |
+| `GET huggingface.co/api/models/Alkemos/alkemosai-weights` بلا مصادقة | HTTP ‏401 — المستودع خاص فعلًا (تحقق خصوصية سالب) |
+| `GET router.huggingface.co/v1/models` (Bearer — سرد فقط) | 200 بـ158 نموذجًا مسرودًا عبر موفري الاستدلال — **سرد بلا توليد = بلا استهلاك أي رصيد** (طبقة «فحوص دخان» فقط — ZERO_COST_PLAN §3.1) |
+| `POST api.kaggle.com/v1/security.OAuthService/IntrospectToken` (Basic — استدعاء فعلي) | المفتاح الصحيح: `{active: true, username: alkemosai, scope: resources.admin:*}` — والمفتاح الخاطئ: HTTP ‏404 — **نقطة التحقق القاطعة الوحيدة** (سرد البيانات العامة يعيد 200 بلا اعتماديات أصلًا — مقيس بمصفوفة: بلا اعتماديات/خاطئة/صحيحة) |
+| `POST api.kaggle.com/v1/kernels.KernelsApiService/GetAcceleratorQuotaStatistics` (Bearer — قراءة-فقط) | حصة GPU ‏**30 س/أسبوع (108000s) — 0 مستخدمة** + TPU ‏**20 س/أسبوع (72000s)** + التجديد `2026-11-28T00:00:00Z` — أول قياس حي للحصة بدلًا من التوثيق وحده؛ **قيد مصادقة مقيس: خدمة kernels ترفض Basic (401) وتقبل Bearer بمفتاح KGAT** |
+| GitHub REST API: `PUT /actions/secrets/{name}` (استدعاء فعلي بتشفير libsodium) | استجابة 201 لكل من `HF_TOKEN`·`KAGGLE_USERNAME`·`KAGGLE_KEY` والسرد يؤكد وجودها — GitHub لا تُرجع القيم أبدًا |
+
+**قانون مستخلص (يُلزم سكربتات M2):** نجاح استدعاء API بلا استهلاك = «سرد»؛ إثبات الصلاحية يتطلب نقطة تحقق سلوكية قاطعة (نموذجيًا: استعلام سلامة أو عملية قراءة تُرفض بلا اعتماديات صحيحة) — لا يُكتفى بـ200 من نقطة تقبل الوصول العام.
+
 </div>
