@@ -23,7 +23,13 @@ m1_build_datasets.py — مولّد بيانات M1 (دفعة 8 — 2026-11-22 U
   - حتمية كاملة: بلا عشوائية إطلاقًا — تنويع الصياغات بتدوير الفهرس، فينتج
     نفس الملفات من نفس المدخلات دائمًا (عقد إعادة البناء — PLAN §8.3).
   - الفصل الصارم: لا تدخل أي حالة من البطارية في datasets/ أبدًا
-    (evaluation/README ق2) — يتحقق منه هذا السكربت في نهاية التشغيل.
+    (evaluation/README ق2) — يتحقق منه هذا السكربت في نهاية التشغيل
+    بثلاث طبقات (حرفي/مطبّع/احتواء) على المهام والإجابات معًا.
+  - سلامة الاستشهاد إلزامية الوجهين (تتمة مراجعة دفعة 8، بأمر المالك):
+    كل حقل source — في سجلات التدريب وفي حالات البطارية — يجب أن يحمل
+    SHA يطابق SOURCE_SHA حرفيًا (الصيغة القصيرة 7 محرف أو الكاملة 40 —
+    لا يكفي أن يكون سداسيًا سليم الشكل) ومسارًا داخل SOURCE_FILES
+    المجلوبة فعلًا في نفس التشغيل.
   - لا بيانات مستخدمين ولا PII إطلاقًا (SECURITY §3).
   - طوابع UTC (ADR-0013).
 
@@ -1589,8 +1595,26 @@ def build_battery(foods_by_slug: dict, rules: dict, n_exercises: int) -> list:
 
 EVAL_ID_RE = re.compile(r"^EVAL-v0-\d{3}$")
 UTC_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-SOURCE_PATH_RE = re.compile(r"^alkemos-aws@[0-9a-f]+:(src/[^\s#]+)")
+# الاستشهاد: يلتقط SHA والمسار معًا — SHA سداسي 7–40 محرفًا ثم «:» ثم مسار src/
+SOURCE_PATH_RE = re.compile(r"^alkemos-aws@([0-9a-f]{7,40}):(src/[^\s#]+)")
 BATTERY_GROUPS = {"ai-job", "evo", "plans", "constitution"}
+
+
+def citation_error(value: str):
+    """فحص الاستشهاد الإلزامي (تتمة مراجعة دفعة 8 — ملاحظة المالك):
+    يعيد رمز الخطأ ("format"/"sha"/"path") أو None عند السلامة.
+    SHA الاستشهاد يجب أن يطابق SOURCE_SHA حرفيًا — الصيغة القصيرة
+    (SOURCE_SHA[:7] كما تبنيها SRC_TAG) أو الكاملة (40 محرفًا) —
+    لا يُقبل أي SHA سداسي آخر مهما كان شكله سليمًا؛ والمسار يجب أن
+    يكون داخل SOURCE_FILES المجلوبة فعلًا في نفس التشغيل."""
+    m = SOURCE_PATH_RE.match(value)
+    if not m:
+        return "format"
+    if m.group(1) not in (SOURCE_SHA[:7], SOURCE_SHA):
+        return "sha"
+    if m.group(2) not in SOURCE_FILES:
+        return "path"
+    return None
 
 
 def normalize_cmp(s: str) -> str:
@@ -1608,12 +1632,15 @@ def normalize_cmp(s: str) -> str:
 
 
 def verify_outputs(out_root: str, counts: dict, battery: list, derived: dict) -> list:
-    """تحققات ما بعد الإنتاج (محسّنة بمراجعة دفعة 8 — الملاحظة 3):
+    """تحققات ما بعد الإنتاج (محسّنة بمراجعة دفعة 8 وتتمتها):
     مطابقة تامة للأعداد الفعلية المتوقعة + صلاحية المخطط + فردية المعرفات
-    عبر كل الملفات + فصل تدريب/تقييم بثلاث طبقات + سلامة الاستشهادات."""
+    عبر كل الملفات + فصل تدريب/تقييم بثلاث طبقات على المهام والإجابات معًا
+    (الاحتواء الجزئي يشمل إجابات التدريب مقابل إجابات البطارية) + سلامة
+    الاستشهاد بمطابقة SHA إلزامية مع SOURCE_SHA."""
     errors = []
-    stats = {"records_scanned": 0, "cited_paths_ok": 0, "sep_exact": 0,
-             "sep_normalized": 0, "sep_answers": 0, "sep_containment": 0}
+    stats = {"records_scanned": 0, "cited_ok": 0, "sep_exact": 0,
+             "sep_normalized": 0, "sep_answers": 0, "sep_containment": 0,
+             "sep_answer_containment": 0}
 
     # 1) الأعداد الفعلية المتوقعة — مطابقة تامة (لا حدود دنيا)
     for key, label in [("exercises_ar", "exercises_ar_records"),
@@ -1660,12 +1687,16 @@ def verify_outputs(out_root: str, counts: dict, battery: list, derived: dict) ->
                 continue
             if len(r["messages"]) != 2:
                 errors.append(f"bad messages len in {rel}: {r['id']}")
-            # سلامة الاستشهاد: مسار المصدر داخل الملفات المجلوبة
-            m = SOURCE_PATH_RE.match(r.get("source", ""))
-            if not m or m.group(1) not in SOURCE_FILES:
-                errors.append(f"bad/unknown source path in {rel}: {r['id']} → {r.get('source')}")
+            # سلامة الاستشهاد: SHA مطابق لـSOURCE_SHA + مسار داخل المجلوب
+            cerr = citation_error(r.get("source", ""))
+            if cerr == "sha":
+                errors.append(f"source SHA != SOURCE_SHA in {rel}: "
+                              f"{r['id']} → {r.get('source')}")
+            elif cerr:
+                errors.append(f"bad/unknown source ({cerr}) in {rel}: "
+                              f"{r['id']} → {r.get('source')}")
             else:
-                stats["cited_paths_ok"] += 1
+                stats["cited_ok"] += 1
             for msg in r["messages"]:
                 if msg["role"] == "user":
                     train_user_texts.append((r["id"], rel, msg["content"],
@@ -1695,21 +1726,31 @@ def verify_outputs(out_root: str, counts: dict, battery: list, derived: dict) ->
             errors.append(f"eval empty task/expected: {r.get('id')}")
         if not UTC_DATE_RE.match(str(r.get("added_utc", ""))):
             errors.append(f"eval bad added_utc: {r.get('id')} → {r.get('added_utc')}")
-        m = SOURCE_PATH_RE.match(r.get("source", ""))
-        if not m or m.group(1) not in SOURCE_FILES:
-            errors.append(f"eval bad/unknown source path: {r.get('id')} → {r.get('source')}")
+        cerr = citation_error(r.get("source", ""))
+        if cerr == "sha":
+            errors.append(f"eval source SHA != SOURCE_SHA: "
+                          f"{r.get('id')} → {r.get('source')}")
+        elif cerr:
+            errors.append(f"eval bad/unknown source ({cerr}): "
+                          f"{r.get('id')} → {r.get('source')}")
+        else:
+            stats["cited_ok"] += 1
 
     # تصادم المعرفات بين البطارية والتدريب (فصل الهوية)
     id_collisions = eval_ids & all_ids
     if id_collisions:
         errors.append(f"ID collision train/battery: {sorted(id_collisions)}")
 
-    # الفصل الصارم — ثلاث طبقات (الملاحظة 3):
+    # الفصل الصارم — ثلاث طبقات على المهام والإجابات معًا (الملاحظة 3
+    # وتتمتها بأمر المالك: الاحتواء الجزئي يشمل الإجابات أيضًا لا المهام وحدها):
     #   (1) تطابق حرفي للمهام · (2) تطابق بعد التطبيع (مهام + إجابات)
-    #   (3) احتواء جزئي بعد التطبيع (الأقصر ≥40 محرفًا) في الاتجاهين
+    #   (3) احتواء جزئي بعد التطبيع (الأقصر ≥40 محرفًا) في الاتجاهين —
+    #       إجابات البطارية مقابل إجابات التدريب كما للمهام تمامًا
     eval_tasks_exact = {r["task"] for r in eval_recs}
     eval_tasks_norm = {normalize_cmp(r["task"]) for r in eval_recs}
-    eval_exp_norm = {normalize_cmp(r["expected"]) for r in eval_recs}
+    eval_exp_items = [(r["id"], normalize_cmp(r["expected"])) for r in eval_recs]
+    eval_exp_norm = {t for _, t in eval_exp_items}
+    eval_exp_long = [(eid, t) for eid, t in eval_exp_items if len(t) >= 40]
     eval_tasks_long = {t for t in eval_tasks_norm if len(t) >= 40}
     for rec_id, rel, raw, nt in train_user_texts:
         if raw in eval_tasks_exact:
@@ -1726,11 +1767,21 @@ def verify_outputs(out_root: str, counts: dict, battery: list, derived: dict) ->
                     errors.append(f"BATTERY LEAK (task containment) into {rel}: {rec_id}")
                     stats["sep_containment"] += 1
                     break
-    # إجابات البطارية لا تظهر كإجابات تدريب (مطابقة مطبّعة)
+    # إجابات البطارية لا تظهر كإجابات تدريب: مطابقة مطبّعة ثم احتواء جزئي
+    # (تتمة مراجعة دفعة 8: الطبقة الثالثة تسري على الإجابات كما للمهام —
+    #  إجابة بطارية ≥40 محرفًا داخل إجابة تدريب أو العكس = تسريب يُخفق البناء)
     for rec_id, rel, na in train_assistant_norm:
         if na in eval_exp_norm:
             errors.append(f"BATTERY LEAK (normalized expected→assistant) into {rel}: {rec_id}")
             stats["sep_answers"] += 1
+            continue
+        if len(na) >= 40:
+            for eid, et in eval_exp_long:
+                if et in na or na in et:
+                    errors.append(f"BATTERY LEAK (answer containment) into {rel}: "
+                                  f"{rec_id} ↔ {eid}")
+                    stats["sep_answer_containment"] += 1
+                    break
 
     # 3) أعداد البطارية المثبتة في التوثيق — مطابقة تامة
     n = len(eval_recs)
@@ -1756,8 +1807,10 @@ def verify_outputs(out_root: str, counts: dict, battery: list, derived: dict) ->
     # 4) الأعداد المتوقعة أُبلغ عنها (سجل الفحص)
     print(f"      [فصل] سجلات مفحوصة={stats['records_scanned']} · "
           f"تطابق حرفي={stats['sep_exact']} · تطابق مطبّع={stats['sep_normalized']} · "
-          f"احتواء={stats['sep_containment']} · إجابات={stats['sep_answers']}")
-    print(f"      [استشهاد] مسارات موثقة داخل SOURCE_FILES={stats['cited_paths_ok']}")
+          f"احتواء مهام={stats['sep_containment']} · إجابات مطبّع={stats['sep_answers']} · "
+          f"احتواء إجابات={stats['sep_answer_containment']}")
+    print(f"      [استشهاد] سليمة SHA+مسار={stats['cited_ok']} "
+          f"(SHA إلزامي مطابق لـSOURCE_SHA {SOURCE_SHA[:7]} — تدريب وبطارية)")
     return errors
 
 
@@ -1868,8 +1921,9 @@ def main() -> int:
             print("  -", e)
         return 1
     print("\nنجح التحقق الكامل: الأعداد مطابقة تمامًا للموثق، JSON صحيح، معرفات فردية "
-          "بلا تصادم، فصل البطارية عن التدريب مؤكد بثلاث طبقات (حرفي/مطبّع/احتواء)، "
-          "وكل استشهاد داخل ملفات المصدر المجلوبة.")
+          "بلا تصادم، فصل البطارية عن التدريب مؤكد بثلاث طبقات على المهام "
+          "والإجابات معًا (حرفي/مطبّع/احتواء)، وكل استشهاد سليم الوجهين: SHA "
+          "مطابق لـSOURCE_SHA ومسار داخل ملفات المصدر المجلوبة.")
     return 0
 
 
