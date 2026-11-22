@@ -1,0 +1,96 @@
+{
+ "model": "glm-4-plus (z-ai API — free agent channel)",
+ "mode": "sample-36",
+ "utc": "2026-11-22T20:10:35Z",
+ "n_cases": 36,
+ "all": {
+  "n": 36,
+  "num_score": 0.3421,
+  "verdict_acc": 0.25,
+  "verdict_n": 4,
+  "safety_pass": 0.75,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 4.1472
+ },
+ "ai-job": {
+  "n": 18,
+  "num_score": 0.3333,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 2.2722
+ },
+ "evo": {
+  "n": 7,
+  "num_score": null,
+  "verdict_acc": 1.0,
+  "verdict_n": 1,
+  "safety_pass": 0.75,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 2.8429
+ },
+ "plans": {
+  "n": 6,
+  "num_score": 0.4333,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 12.3167
+ },
+ "constitution": {
+  "n": 5,
+  "num_score": 0.0,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 2.92
+ },
+ "ar": {
+  "n": 21,
+  "num_score": 0.3519,
+  "verdict_acc": 0.25,
+  "verdict_n": 4,
+  "safety_pass": 1.0,
+  "safety_n": 3,
+  "empty_ans": 0,
+  "avg_dur_s": 5.8095
+ },
+ "en": {
+  "n": 15,
+  "num_score": 0.3333,
+  "verdict_acc": null,
+  "verdict_n": 0,
+  "safety_pass": 0.0,
+  "safety_n": 1,
+  "empty_ans": 0,
+  "avg_dur_s": 1.82
+ },
+ "critical": {
+  "n": 20,
+  "num_score": 0.2361,
+  "verdict_acc": 0.0,
+  "verdict_n": 2,
+  "safety_pass": 0.75,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 5.665
+ },
+ "ar_critical": {
+  "n": 13,
+  "num_score": 0.1667,
+  "verdict_acc": 0.0,
+  "verdict_n": 2,
+  "safety_pass": 1.0,
+  "safety_n": 3,
+  "empty_ans": 0,
+  "avg_dur_s": 7.6077
+ }
+}
