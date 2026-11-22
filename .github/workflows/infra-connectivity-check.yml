@@ -1,0 +1,43 @@
+name: "Infra — فحص اتصال HF/Kaggle (يدوي)"
+
+# ADR-0020 · دفعة 10 — يتحقق داخل بيئة Actions نفسها من الأسرار الثلاثة
+# (HF_TOKEN · KAGGLE_USERNAME · KAGGLE_KEY) عبر سكربت قراءة-فقط:
+# لا توليد استدلال (لا يستهلك أي رصيد) ولا أي GPU ولا أي كتابة في أي خدمة.
+# تشغيل يدوي فقط (workflow_dispatch) — لا جدولة ولا مشغّلات دفع/PR
+# (القاعدة: سير يستخدم أسرارًا لا يُطلق تلقائيًا ولا من PR خارجي — SECURITY §8.6).
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read          # للاستنساخ فقط — لا كتابة من هذا السير
+
+concurrency:
+  group: infra-connectivity-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: استنساخ المستودع
+        uses: actions/checkout@v4
+
+      - name: تسجيل أقنعة السجلات (دفاع إضافي)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          set -euo pipefail
+          # سطور add-mask لا تُطبع في السجلات (تُعالج قبل التسجيل) —
+          # أي ظهور عرضي لأي من القيمتين لاحقًا يظهر مموهًا.
+          echo "::add-mask::${HF_TOKEN}"
+          echo "::add-mask::${KAGGLE_KEY}"
+
+      - name: فحص الاتصال والصلاحيات (قراءة-فقط — لا استهلاك موارد)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: python3 scripts/infra_check_hf_kaggle.py
