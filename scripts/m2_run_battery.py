@@ -38,7 +38,7 @@ def normalize_text(t: str) -> str:
     t = t.replace("٫", ".").replace("٬", ",")
     return t
 
-def strip_think(t: str) -> str:
+def strip_think(t: str):
     return re.sub(r"<think>.*?</think>", "", t, flags=re.S).strip()
 
 def extract_numbers(t: str):
@@ -130,7 +130,12 @@ class GGUFChannel:
         return raw, out["usage"].get("completion_tokens", 0), time.time() - t0
 
 class ZaiChannel:
-    """قناة API مجانية في بيئة الوكيل (glm-4-plus عبر z-ai CLI) — [قناة بيئة الوكيل فقط]"""
+    """قناة API مجانية في بيئة الوكيل (glm-4-plus عبر z-ai CLI) — [قناة بيئة الوكيل فقط]
+
+    قيود القناة الموثقة (لا يوفرها CLI): لا temperature (يفترض افتراضي الخدمة)، لا حد رموز إخراج.
+    إصلاح دفعة 13-ب: المحادثة تُمرر نصًا نظيفًا — الطلمة الواحدة بمحتواها كما هي،
+    والمتعددة الأدوار كنص أدوار واضح يُختم بـ "Assistant:" (CLI لا يدعم messages متعددة،
+    وكان التمرير السابق JSON خامًا داخل البرومبت فيشوه البروتوكول الموحد)."""
     def __init__(self, max_tokens=500):
         self.max_tokens = max_tokens
         self.label = "glm-4-plus (z-ai API — free agent channel)"
@@ -142,25 +147,37 @@ class ZaiChannel:
         if turns and turns[0]["role"] == "system":
             sys_txt = turns[0]["content"]
             turns = turns[1:]
-        payload = {"messages": [{"role": m["role"], "content": m["content"]} for m in turns]}
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump(payload, f, ensure_ascii=False)
-            pfile = f.name
+        if len(turns) == 1:
+            prompt = turns[0]["content"]
+        else:
+            parts = [f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+                     for m in turns]
+            prompt = "\n\n".join(parts) + "\n\nAssistant:"
         try:
             with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
                 ofile = f.name
-            cmd = ["z-ai", "chat", "-p", json.dumps(payload, ensure_ascii=False),
-                   "-s", sys_txt, "-o", ofile]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-            if r.returncode != 0:
-                return f"[zai-error] {r.stderr[:200]}", 0, time.time() - t0
-            d = json.load(open(ofile))
-            raw = d["choices"][0]["message"]["content"] or ""
-            return raw, d.get("usage", {}).get("completion_tokens", 0), time.time() - t0
+            # إصلاح دفعة 13-ب: إعادة محاولة بخطأ 429 (تحديد المعدل على القناة المجانية)
+            # بتراجع 20/40/60 ث — نفس نهج سير m2-battery (إعادة محاولة الدفع عند التعارض).
+            backoffs = [0, 20, 40, 60]
+            raw = ""
+            for attempt, delay in enumerate(backoffs):
+                if delay:
+                    time.sleep(delay)
+                cmd = ["z-ai", "chat", "-p", prompt, "-s", sys_txt, "-o", ofile]
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                if r.returncode == 0 and os.path.exists(ofile):
+                    d = json.load(open(ofile))
+                    raw = d["choices"][0]["message"]["content"] or ""
+                    if raw.strip():
+                        return raw, d.get("usage", {}).get("completion_tokens", 0), time.time() - t0
+                err = (r.stderr or "") + (r.stdout or "")
+                if "429" not in err:
+                    return f"[zai-error] {err[:200]}", 0, time.time() - t0
+                print(f"[zai-429] attempt {attempt+1}/{len(backoffs)} — retrying after {delay or '0'}s", flush=True)
+            return f"[zai-error-429-exhausted] {err[:120]}", 0, time.time() - t0
         finally:
-            for p in (pfile, ofile if 'ofile' in dir() else None):
-                if p and os.path.exists(p):
-                    os.unlink(p)
+            if 'ofile' in dir() and ofile and os.path.exists(ofile):
+                os.unlink(ofile)
 
 # ---------------------------------------------------------------- runner
 
