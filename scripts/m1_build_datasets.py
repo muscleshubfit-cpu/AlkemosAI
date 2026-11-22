@@ -10,6 +10,15 @@ m1_build_datasets.py — مولّد بيانات M1 (دفعة 8 — 2026-11-22 U
 القوانين الملزمة المطبقة هنا:
   - الأرقام حقول إلزامية من البيانات المنظمة (datasets/README ق5) — كل رقم
     في المخرجات يأتي من حقول المصدر أو حساب حتمي عليها موثق في هذا الملف.
+  - قانون أرقام البطارية (تصحيح مراجعة دفعة 8، بأمر المالك): كل قيمة رقمية
+    في expected صنفان لا ثالث لهما —
+      (أ) محسوبة بالكود: نتائج المعادلات المنسوخة حرفيًا من كود المنصة
+          (Mifflin-St Jeor وBMI ومعادلتا البحرية والماء والماكروز والحصص)؛
+      (ب) قاعدة/ثابت منقول حرفيًا من نص المصدر (نطاقات/تسامحات/توزيعات/
+          عددات مثل ±25% و1200–4000 و3–5 وجبات و5–600 غ): كل واحدة منها
+          تُستخرج أو تُثبَّت في collect_source_rules() من نص المصدر نفسه،
+          ويُخفق البناء فورًا عند أي انحراف بين الرقم الموثق في الحالة
+          والمصدر — لا انحراف صامت أبدًا.
   - كل مثال يحمل source: (datasets/README ق4).
   - حتمية كاملة: بلا عشوائية إطلاقًا — تنويع الصياغات بتدوير الفهرس، فينتج
     نفس الملفات من نفس المدخلات دائمًا (عقد إعادة البناء — PLAN §8.3).
@@ -47,7 +56,8 @@ ACCESS_UTC = "2026-11-22"
 ADDED_UTC = "2026-11-22"
 SRC_TAG = f"alkemos-aws@{SOURCE_SHA[:7]}"
 
-# ملفات المصدر المطلوبة (كلها قراءة-فقط من المستودع العام)
+# ملفات المصدر المطلوبة (كلها قراءة-فقط من المستودع العام) — تشمل كل ملف
+# يُستشهد به في أي حالة بطارية أو أي سجل بيانات (فحص سلامة الاستشهاد أدناه)
 SOURCE_FILES = [
     "src/lib/exercises.ts",
     "src/lib/exercises-shared.ts",
@@ -63,17 +73,32 @@ SOURCE_FILES = [
     "src/lib/evo-safety.ts",
     "src/lib/blog-editorial-law.ts",
     "src/lib/plan-ai-validation.ts",
+    "src/lib/content/macro-calculator.ts",
+    "src/lib/content/bmi-calculator.ts",
+    "src/lib/content/body-fat-calculator.ts",
+    "src/lib/content/water-tracker.ts",
+    "src/lib/evo-faq.ts",
 ]
 
 # الأعداد المرجعية المُقيسة (PLAN §3.1) — أي انحراف = فشل تحقق
+# (تصحيح مراجعة دفعة 8: مطابقة تامة للأعداد الفعلية المتوقعة لا حدود دنيا —
+#  التوثيق والكود لا يفترقان صامتًا؛ أي تغيير مقصود في الأعداد يستلزم تحديث
+#  هذه القيم بوعي مع الوثائق في نفس الدفعة)
 EXPECTED = {
     "exercises": 868,
     "foods": 8162,
     "programs": 7,
     "diet_levels": 6,
     "diet_systems": 4,
-    "battery_target": 160,   # ضمن نطاق 100–200 (مواصفة §1)
-    "battery_min": 100,
+    "exercises_ar_records": 2604,   # 868 × (قالبان دائمًا + خطوات عند وجودها)
+    "exercises_en_records": 2604,
+    "programs_records": 62,         # (7 برامج + 24 خلية) × لغتين
+    "battery_total": 162,
+    "battery_groups": {"ai-job": 82, "evo": 30, "plans": 25, "constitution": 25},
+    "battery_critical": 87,
+    "battery_ar": 104,
+    "battery_en": 58,
+    "battery_min": 100,   # نطاق المواصفة §1 (قيد إضافي فوق المطابقة التامة)
     "battery_max": 200,
 }
 
@@ -276,6 +301,178 @@ def extract_const(text: str, name: str):
     parser = TSLiteralParser(clean)
     parser.i = m.end()
     return parser.parse_value()
+
+
+# ────────────── تثبيت القواعد والثوابت المنقولة من المصدر ──────────────
+# (تصحيح مراجعة دفعة 8 — الملاحظة 2): القيم الرقمية من الفئة (ب) في قانون
+# أرقام البطارية (أنظر الترويسة) تُستخرج هنا من المصدر نفسه أو تُثبّت بنمط
+# حرفي — وأي انحراف بين ما توثقه حالة البطارية ونص المصدر يُخفق البناء.
+
+REPLICA_ACTIVITY_FACTORS = {"sedentary": 1.2, "light": 1.375, "moderate": 1.55,
+                            "active": 1.725, "very_active": 1.9}
+
+NAVY_MALE_LITERAL = ("495 / (1.0324 − 0.19077·log10(waist−neck) "
+                     "+ 0.15456·log10(height)) − 450")
+NAVY_FEMALE_LITERAL = ("495 / (1.29579 − 0.35004·log10(waist+hip−neck) "
+                       "+ 0.22100·log10(height)) − 450")
+
+
+def pin_literal(text: str, literal: str, label: str):
+    """تثبيت نص حرفي موثق في المصدر — يُخفق البناء إن غاب أو تغير."""
+    if literal not in text:
+        raise ValueError(f"SOURCE PIN FAILED: {label} — الحرفي لم يعد في المصدر: {literal!r}")
+
+
+def pin_text(text: str, pattern: str, label: str):
+    """تثبيت بنمط (للأسطر الملتفة أو المتغيرة المسافات) — يُخفق إن غاب."""
+    if not re.search(pattern, text):
+        raise ValueError(f"SOURCE PIN FAILED: {label} — النمط لم يعد في المصدر: {pattern!r}")
+
+
+def collect_source_rules(sources: dict) -> dict:
+    """استخراج وتثبيت كل قاعدة/ثابت يُقتبس في حالات البطارية.
+
+    تُرجع قاموس rules تُنسّق منه صياغات الحالات — فيصبح التوثيق مشتقًا من
+    المصدر لا منسوخًا يدويًا، وتبقى المعادلات المنسوخة في هذا الملف مُطابَقة
+    إلزاميًا لما يُثبّته المصدر.
+    """
+    rules = {}
+
+    # ── (أ) ثوابت مهيكلة تُحلّل حرفيًا من كود المصدر ──
+    factors = extract_export(sources["src/lib/fitness-math.ts"], "ACTIVITY_FACTORS")
+    if factors != REPLICA_ACTIVITY_FACTORS:
+        raise ValueError(f"ACTIVITY_FACTORS changed in source: {factors}")
+    rules["activity_factors"] = factors
+
+    rules["cal_min"] = extract_export(sources["src/lib/ai-meal-planner.ts"], "DEMO_CALORIE_MIN")
+    rules["cal_max"] = extract_export(sources["src/lib/ai-meal-planner.ts"], "DEMO_CALORIE_MAX")
+    rules["cal_drift"] = extract_export(sources["src/lib/ai-meal-planner.ts"], "DEMO_CALORIE_DRIFT")
+    if (rules["cal_min"], rules["cal_max"], rules["cal_drift"]) != (1200, 4000, 0.2):
+        raise ValueError(f"meal-planner calorie bounds changed: {rules}")
+
+    sanity = extract_export(sources["src/lib/plan-ai-validation.ts"], "PLAN_AI_SANITY")
+    rules["plan_drift"] = sanity["planDriftTolerance"]          # 0.25
+    rules["meal_drift"] = sanity["mealDriftTolerance"]          # 0.20
+    rules["item_drift"] = sanity["itemDriftTolerance"]          # 0.15
+    rules["alt_drift"] = sanity["alternativeCalorieTolerance"]  # 0.10
+    rules["day_ex_min"] = sanity["dayExerciseMin"]              # 3
+    rules["day_ex_max"] = sanity["dayExerciseMax"]              # 8
+    expected_sanity = {"plan_drift": 0.25, "meal_drift": 0.2, "item_drift": 0.15,
+                       "alt_drift": 0.1, "day_ex_min": 3, "day_ex_max": 8}
+    for k, v in expected_sanity.items():
+        if rules[k] != v:
+            raise ValueError(f"PLAN_AI_SANITY mismatch — {k}: {rules[k]} != {v}")
+
+    faq = extract_export(sources["src/lib/blog-editorial-law.ts"], "EDITORIAL_FAQ_COUNT_RANGE")
+    rules["faq_min"], rules["faq_max"] = faq["min"], faq["max"]
+    if (rules["faq_min"], rules["faq_max"]) != (4, 7):
+        raise ValueError(f"FAQ count range changed: {faq}")
+    domains = extract_export(sources["src/lib/blog-editorial-law.ts"], "EDITORIAL_AUTHORITY_DOMAINS")
+    rules["domains"] = list(domains)
+    if len(rules["domains"]) != 14:
+        raise ValueError(f"authority domains count changed: {len(rules['domains'])}")
+
+    # ── (ب) ثوابت موثقة في نص المصدر — تثبيت حرفي/بنمط ──
+    # توزيعات الماكروز الخمسة: موثقة في ترويسة macro-calculator (كل رقم في
+    # النسخة يطابق الكود — canaries) — تُحلل من السطر وتُطابق نسخة هذا الملف
+    macro_src = sources["src/lib/content/macro-calculator.ts"]
+    m = re.search(r"balanced (\d+)/(\d+)/(\d+)[\s*]*\(P/C/F\), low-carb (\d+)/(\d+)/(\d+), "
+                  r"high-protein (\d+)/(\d+)/(\d+), keto (\d+)/(\d+)/(\d+),[\s*]*"
+                  r"low-fat (\d+)/(\d+)/(\d+)", macro_src)
+    if not m:
+        raise ValueError("SOURCE PIN FAILED: MACRO_PRESETS header line not found")
+    v = [int(x) for x in m.groups()]
+    parsed_presets = {"balanced": {"protein": v[0], "carbs": v[1], "fat": v[2]},
+                      "low-carb": {"protein": v[3], "carbs": v[4], "fat": v[5]},
+                      "high-protein": {"protein": v[6], "carbs": v[7], "fat": v[8]},
+                      "keto": {"protein": v[9], "carbs": v[10], "fat": v[11]},
+                      "low-fat": {"protein": v[12], "carbs": v[13], "fat": v[14]}}
+    if parsed_presets != MACRO_PRESETS:
+        raise ValueError(f"MACRO_PRESETS replica != source header: {parsed_presets}")
+    rules["macro_presets"] = parsed_presets
+    # التوزيع الافتتاحي لحاسبة السعرات (30/40/30 ب/ك/د — يسميه المصدر 40/30/30)
+    fm = sources["src/lib/fitness-math.ts"]
+    pin_literal(fm, "the 40/30/30 macro split", "fitness-math starter split label")
+    pin_literal(fm, "const protein = Math.round((target * 0.3) / 4);", "starter protein 30%/4")
+    pin_literal(fm, "const carbs = Math.round((target * 0.4) / 4);", "starter carbs 40%/4")
+    pin_literal(fm, "const fat = Math.round((target * 0.3) / 9);", "starter fat 30%/9")
+    pin_literal(fm, 'if (goal === "lose") target = Math.round(tdee - 500);', "lose -500")
+    pin_literal(fm, 'if (goal === "gain") target = Math.round(tdee + 400);', "gain +400")
+
+    bmi_src = sources["src/lib/content/bmi-calculator.ts"]
+    pin_literal(bmi_src, "cutoffs (18.5 / 25 / 30)", "BMI WHO cutoffs")
+    pin_literal(bmi_src, "Canaries pin 18.5, 24.9, 25 and 30", "BMI canaries")
+    rules["bmi_cutoffs"] = (18.5, 25.0, 30.0)
+
+    bf_src = sources["src/lib/content/body-fat-calculator.ts"]
+    pin_literal(bf_src, NAVY_MALE_LITERAL, "Navy male formula")
+    pin_literal(bf_src, NAVY_FEMALE_LITERAL, "Navy female formula")
+    pin_literal(bf_src, "3–4 percentage points", "Navy vs DEXA band")
+    pin_literal(bf_src, "Hodgdon–Beckett", "Navy attribution")
+
+    water_src = sources["src/lib/content/water-tracker.ts"]
+    pin_literal(water_src, "35 ml × body weight (kg)", "water 35ml/kg")
+    pin_literal(water_src, "clamped between 2,000 and 4,500 ml", "water clamp")
+    pin_literal(water_src, "standard 250 ml glass per tap", "water cup tap")
+    rules["water_ml_per_kg"] = 35
+    rules["water_clamp"] = (2000, 4500)
+
+    matrix_src = sources["src/lib/diet-plan-matrix.ts"]
+    pin_text(matrix_src, r"within ±10 kcal of the level", "matrix closure law")
+    pin_text(matrix_src,
+             r"vegetarian 25/50/25 is documented here as the site's matrix-only[\s*]*preset",
+             "vegetarian matrix-only preset")
+    rules["matrix_closure"] = 10
+
+    mp = sources["src/lib/ai-meal-planner.ts"]
+    pin_literal(mp, "3 to 5 meals; 2 to 6 items per meal; every item 5 to 600 grams",
+                "meal-planner prompt item rules")
+    pin_literal(mp, "must carry 1 to 8 items", "meal-planner validator items")
+    mg = re.search(r"grams must be (\d+)–(\d+)", mp)
+    if not mg:
+        raise ValueError("SOURCE PIN FAILED: meal-planner validator grams")
+    rules["meal_item_grams_prompt"] = (5, 600)
+    rules["meal_item_grams_validator"] = (int(mg.group(1)), int(mg.group(2)))  # (5, 900)
+    mc = re.search(r"(\d+) to (\d+) meals", mp)
+    if not mc:
+        raise ValueError("SOURCE PIN FAILED: meal-planner meal count")
+    rules["meal_count"] = (int(mc.group(1)), int(mc.group(2)))  # (3, 5)
+
+    wp = sources["src/lib/ai-workout-planner.ts"]
+    wex = re.search(r"must carry (\d+) to (\d+) exercises", wp)
+    if not wex:
+        raise ValueError("SOURCE PIN FAILED: workout exercises/day")
+    rules["wo_ex_day"] = (int(wex.group(1)), int(wex.group(2)))  # (3, 8)
+    wst = re.search(r"sets must be an integer (\d+)–(\d+)", wp)
+    if not wst:
+        raise ValueError("SOURCE PIN FAILED: workout validator sets")
+    rules["wo_sets_validator"] = (int(wst.group(1)), int(wst.group(2)))  # (1, 10)
+    wrp = re.search(r"reps must be (\d+)–(\d+) or a range like", wp)
+    if not wrp:
+        raise ValueError("SOURCE PIN FAILED: workout validator reps")
+    rules["wo_reps_validator"] = (int(wrp.group(1)), int(wrp.group(2)))  # (1, 50)
+    pin_literal(wp, "10-20 weekly sets per large muscle (chest/back/legs/shoulders) and 6-12 per small one",
+                "workout volume bands")
+    rules["wo_volume_large"] = (10, 20)
+    rules["wo_volume_small"] = (6, 12)
+    pin_literal(wp, "2 to 6 sets of 5 to 20 reps", "workout prompt sets/reps")
+    rules["wo_sets_prompt"] = (2, 6)
+    rules["wo_reps_prompt"] = (5, 20)
+    pin_literal(wp, "compound movements FIRST", "workout ordering law")
+    pin_literal(wp, "Write every day name, its target muscles, and every exercise name in English",
+                "workout EN output law")
+
+    mt = sources["src/lib/ai-workout-exercise-match.ts"]
+    pin_literal(mt, "coverage ≥ 0.6 with ≥2 matched tokens", "match coverage law")
+
+    evo = sources["src/lib/evo-system-prompt.ts"]
+    pin_literal(evo, "3-5 lines max, ideally 1-3 sentences", "EVO brevity law")
+    pin_literal(evo, "up to 4 questions, one per reply", "EVO first-meeting protocol")
+    pin_literal(evo, "never refuse a plan request and never mention quotas", "EVO 2026-09-13 law")
+    pin_literal(evo, "SWAPS remain subscriber-only", "EVO swaps subscriber-only")
+    pin_literal(evo, "NO LaTeX, NO TeX, NO markdown syntax", "EVO plain-text law")
+
+    return rules
 
 
 # ────────────────────────── حسابات مطابقة لجافاسكربت ──────────────────────────
@@ -543,8 +740,19 @@ PROGRAM_GOAL_AR = {"general": "لياقة عامة", "strength": "قوة", "hype
 PROGRAM_GOAL_EN = {"general": "General Fitness", "strength": "Strength", "hypertrophy": "Hypertrophy", "fat-loss": "Fat Loss", "endurance": "Endurance"}
 
 
-def sft_programs(programs: list, levels: list, systems: list) -> list:
-    """سجلان لكل برنامج (عربي/إنجليزي) + سجلان لكل خلية من مصفوفة 6×4=24 خطة."""
+def sft_programs(programs: list, levels: list, systems: list,
+                 meal_name_en: dict, food_names_en: dict,
+                 matrix_closure: int = 10) -> list:
+    """سجلان لكل برنامج (عربي/إنجليزي) + سجلان لكل خلية من مصفوفة 6×4=24 خطة.
+
+    استكمال الإنجليزية (تصحيح مراجعة دفعة 8 — الملاحظة 1): أسماء الوجبات
+    والأطعمة في السجلات الإنجليزية للخطط تُعرض بالإنجليزية من خرائط العرض
+    في المصدر نفسه (MEAL_NAME_EN/FOOD_NAMES_EN — §12.27: «one engine, one
+    solve» والمفاتيح العربية هي الهوية والخريطة طبقة العرض للسطح الإنجليزي)
+    — لا نسخًا للعربية في السجل الإنجليزي كما كان. أسماء البرامج الإنجليزية
+    تبقى مع مسمّى عربي بين قوسين (إحالة ثنائية اللغة بالاتجاهين — نظير
+    السجل العربي الذي يعرض الاسم الإنجليزي بين قوسين).
+    """
     records = []
     # البرامج السبعة
     for idx, prog in enumerate(programs):
@@ -554,7 +762,8 @@ def sft_programs(programs: list, levels: list, systems: list) -> list:
         for d in prog["days"]:
             exs_ar = "، ".join(
                 f"{e['nameAr']} ({e['sets']}×{e['reps']})" for e in d["exercises"])
-            exs_en = "، ".join(
+            # الفاصلة الإنجليزية في السجل الإنجليزي (استكمال الإنجليزية — الملاحظة 1)
+            exs_en = ", ".join(
                 f"{e['nameEn']} ({e['sets']}×{e['reps']})" for e in d["exercises"])
             days_ar.append(f"اليوم {d['day']} — {d['titleAr']}: {exs_ar}")
             days_en.append(f"Day {d['day']} — {d['titleEn']}: {exs_en}")
@@ -579,6 +788,7 @@ def sft_programs(programs: list, levels: list, systems: list) -> list:
                         "messages": [{"role": "user", "content": q_en},
                                      {"role": "assistant", "content": a_en}]})
     # مصفوفة الخطط الغذائية 6×4 = 24 خطة (diet-plan-matrix.ts)
+    closure = matrix_closure  # قانون الإغلاق المثبّت من ترويسة المصدر
     for lvl in levels:
         for sysrec in systems:
             split = sysrec["split"]
@@ -586,18 +796,23 @@ def sft_programs(programs: list, levels: list, systems: list) -> list:
             meals_en = []
             for meal in sysrec["meals"]:
                 items_ar = "، ".join(f"{it['food']} {it['grams']} غ" for it in meal["items"])
-                items_en = items_ar  # أسماء الأطعمة في المصدر عربية (حقول منظمة)
+                # الإنجليزية من خرائط العرض في المصدر (§12.27) — المفاتيح
+                # العربية هي الهوية، والخريطة هي ما يعرضه السطح الإنجليزي
+                items_en = ", ".join(f"{food_names_en[it['food']]} {it['grams']} g"
+                                     for it in meal["items"])
                 flex_ar = f" (الصنف المرن: {meal['flex']})" if meal.get("flex") else ""
+                flex_en = (f" (flex item: {food_names_en[meal['flex']]})"
+                           if meal.get("flex") else "")
                 meals_ar.append(f"{meal['name']}: {items_ar}{flex_ar}")
-                meals_en.append(f"{meal['name']} ({sysrec['nameEn']} template): {items_en}")
+                meals_en.append(f"{meal_name_en[meal['name']]}: {items_en}{flex_en}")
             key = f"{lvl}-{sysrec['slug']}"
             src = f"{SRC_TAG}:src/lib/diet-plan-matrix.ts#level={lvl},system={sysrec['slug']}"
             q_ar = (f"ما هي خطة اليوم في نظام {sysrec['nameArDef']} بمستوى {lvl} سعرة؟ "
                     f"وما توزيع الماكروز المعتمد؟")
             a_ar = (f"خطة يوم كامل لنظام {sysrec['nameArDef']} على مستوى {lvl} سعرة تقريبًا "
-                    f"(تُغلق الحاسوبة ضمن ±10 سعرة من المستوى)، بتوزيع ماكروز "
+                    f"(يُغلق حساب اليوم ضمن ±{closure} سعرة من المستوى)، بتوزيع ماكروز "
                     f"بروتين {split['protein']}% / كربوهيدرات {split['carbs']}% / دهون {split['fat']}% "
-                    f"(نفس توزيعات حاسبة الماكروز في الموقع):\n"
+                    f"(نفس توزيعات حاسبة الماكروز في الموقع للأنظمة المشتركة، والنباتي توزيع المصفوفة وحدها):\n"
                     + "\n".join(meals_ar)
                     + "\nالأوزان بالجرام لكل صنف كما في المصفوفة، والقيم الغذائية لكل 100 غرام من قاعدة الأطعمة.")
             records.append({"id": f"SFT-PLAN-AR-{key}", "source": src,
@@ -606,9 +821,9 @@ def sft_programs(programs: list, levels: list, systems: list) -> list:
             q_en = (f"What is the day plan for the {sysrec['nameEn']} system at the {lvl} kcal level, "
                     f"and what macro split does it use?")
             a_en = (f"A full-day {sysrec['nameEn']} plan at the {lvl} kcal level "
-                    f"(the solver closes within ±10 kcal of the level), with a macro split of "
+                    f"(the solver closes within ±{closure} kcal of the level), with a macro split of "
                     f"protein {split['protein']}% / carbs {split['carbs']}% / fat {split['fat']}% "
-                    f"(mirroring the site's macro-calculator presets):\n"
+                    f"(the shared presets mirror the site's macro calculator; vegetarian is the matrix-only preset):\n"
                     + "\n".join(meals_en)
                     + "\nItem weights are in grams as defined by the matrix; nutrition values are per-100 g from the food database.")
             records.append({"id": f"SFT-PLAN-EN-{key}", "source": src,
@@ -621,7 +836,10 @@ def sft_programs(programs: list, levels: list, systems: list) -> list:
 # مواصفة §1: ai-job (10 أدوات × 8) + evo (~30) + plans (~25) + constitution (~25) = ~160
 # مواصفة §2: المجموعة الحرجة (عربية فصحى/أرقام/سلامة) موسومة critical:true
 # مواصفة §3: الصيغة الملزمة {id, group, critical, lang, task, expected, source, added_utc}
-# كل قيمة رقمية في expected تُحسب هنا بالكود (لا رقم يدويًا أبدًا).
+# قانون الأرقام (تصحيح مراجعة دفعة 8): القيم في expected صنفان —
+#   (أ) محسوبة بالكود (المعادلات أدناه) · (ب) قواعد/ثوابت منقولة من المصدر
+#   تُنسّق من rules (المستخرجة/المثبّتة من نص المصدر في collect_source_rules)
+#   — لا رقم يدويًا غير مغطى بأحد الصنفين.
 
 ACT_AR = {"sedentary": "خامل", "light": "خفيف", "moderate": "متوسط", "active": "نشيط", "very_active": "نشيط جدًا"}
 ACT_EN = {"sedentary": "sedentary", "light": "light", "moderate": "moderate", "active": "active", "very_active": "very active"}
@@ -647,13 +865,27 @@ S_FOODS = f"{SRC_TAG}:src/lib/foods.ts#FOODS"
 S_EDLAW = f"{SRC_TAG}:src/lib/blog-editorial-law.ts#editorial-laws"
 
 
-def build_battery(foods_by_slug: dict) -> list:
+def build_battery(foods_by_slug: dict, rules: dict, n_exercises: int) -> list:
     cases = []
 
     def add(group, critical, lang, task, expected, source):
         cases.append({"id": f"EVAL-v0-{len(cases)+1:03d}", "group": group,
                       "critical": critical, "lang": lang, "task": task,
                       "expected": expected, "source": source, "added_utc": ADDED_UTC})
+
+    # اختصارات للقواعد المثبتة (كلها من المصدر عبر collect_source_rules)
+    cal_min, cal_max = rules["cal_min"], rules["cal_max"]
+    cal_drift = rules["cal_drift"]
+    gv_lo, gv_hi = rules["meal_item_grams_validator"]
+    gp_lo, gp_hi = rules["meal_item_grams_prompt"]
+    mc_lo, mc_hi = rules["meal_count"]
+    pd_pct = int(rules["plan_drift"] * 100)
+    md_pct = int(rules["meal_drift"] * 100)
+    id_pct = int(rules["item_drift"] * 100)
+    ad_pct = int(rules["alt_drift"] * 100)
+    bmi_c1, bmi_c2, bmi_c3 = rules["bmi_cutoffs"]
+    w_kg = rules["water_ml_per_kg"]
+    w_lo, w_hi = rules["water_clamp"]
 
     def cal_case_ar(gender, age, w, h, act, goal):
         r = mifflin_st_jeor(gender, age, w, h, act, goal)
@@ -662,7 +894,8 @@ def build_battery(foods_by_slug: dict) -> list:
                 f"الطول {h} سم، النشاط {ACT_AR[act]}، والهدف {GOAL_AR[goal]}.")
         expected = (f"بمعادلة Mifflin-St Jeor: معدل الأيض الأساسي {r['bmr']} سعرة، "
                     f"والإنفاق اليومي الكلي {r['tdee']} سعرة، وهدف السعرات اليومية {r['target']} سعرة. "
-                    f"التوزيع الافتتاحي (40/30/30): بروتين {r['protein']} غ، كربوهيدرات {r['carbs']} غ، دهون {r['fat']} غ.")
+                    f"التوزيع الافتتاحي (بروتين 30% / كارب 40% / دهون 30% — يسميه المصدر 40/30/30): "
+                    f"بروتين {r['protein']} غ، كربوهيدرات {r['carbs']} غ، دهون {r['fat']} غ.")
         return task, expected
 
     def cal_case_en(gender, age, w, h, act, goal):
@@ -670,7 +903,8 @@ def build_battery(foods_by_slug: dict) -> list:
         task = (f"Calculate my calorie needs: {'male' if gender=='male' else 'female'}, age {age}, "
                 f"weight {w} kg, height {h} cm, {ACT_EN[act]} activity, goal to {GOAL_EN[goal]}.")
         expected = (f"Mifflin-St Jeor: BMR {r['bmr']} kcal, TDEE {r['tdee']} kcal, "
-                    f"daily target {r['target']} kcal. Starter 40/30/30 macros: "
+                    f"daily target {r['target']} kcal. Starter macros (protein 30% / carbs 40% / "
+                    f"fat 30% — the source's \"40/30/30\" split): "
                     f"protein {r['protein']} g, carbs {r['carbs']} g, fat {r['fat']} g.")
         return task, expected
 
@@ -725,11 +959,13 @@ def build_battery(foods_by_slug: dict) -> list:
         if lang == "ar":
             task = f"احسب مؤشر كتلة الجسم لشخص وزنه {w} كغ وطوله {h} م."
             expected = (f"المؤشر = {w} ÷ ({h}×{h}) ≈ {v:.1f} — التصنيف: {BF_CAT_AR[cat]}. "
-                        f"فئات WHO المعتمدة في الحاسبة: أقل من 18.5 نقص، 18.5–24.9 طبيعي، 25–29.9 زيادة، 30 فأكثر سمنة.")
+                        f"فئات WHO المعتمدة في الحاسبة: أقل من {bmi_c1} نقص، {bmi_c1}–{bmi_c2-0.1:.1f} طبيعي، "
+                        f"{bmi_c2:.0f}–{bmi_c3-0.1:.1f} زيادة، {bmi_c3:.0f} فأكثر سمنة.")
         else:
             task = f"Calculate the BMI for someone weighing {w} kg at {h} m."
             expected = (f"BMI = {w} / {h}² ≈ {v:.1f} — category: {BF_CAT_EN[cat]}. "
-                        f"The calculator's WHO scale: under 18.5 underweight, 18.5–24.9 normal, 25–29.9 overweight, 30+ obese.")
+                        f"The calculator's WHO scale: under {bmi_c1} underweight, {bmi_c1}–{bmi_c2-0.1:.1f} normal, "
+                        f"{bmi_c2:.0f}–{bmi_c3-0.1:.1f} overweight, {bmi_c3:.0f}+ obese.")
         add("ai-job", True, lang, task, expected, S_BMI)
     add("ai-job", False, "ar",
         "هل مؤشر كتلة الجسم حكم نهائي على صحتي؟",
@@ -738,7 +974,8 @@ def build_battery(foods_by_slug: dict) -> list:
         S_BMI)
     add("ai-job", True, "ar",
         "ما فئات مؤشر كتلة الجسم المعتمدة في حاسبة الموقع؟",
-        "أقل من 18.5 نقص في الوزن · 18.5–24.9 وزن طبيعي · 25–29.9 زيادة في الوزن · 30.0 فأكثر سمنة (حدود WHO التي تستعملها الحاسبة).",
+        f"أقل من {bmi_c1} نقص في الوزن · {bmi_c1}–{bmi_c2-0.1:.1f} وزن طبيعي · {bmi_c2:.0f}–{bmi_c3-0.1:.1f} زيادة في الوزن · "
+        f"{bmi_c3:.0f} فأكثر سمنة (حدود WHO التي تستعملها الحاسبة).",
         S_BMI)
 
     # ═══ الأداة 4 — حاسبة نسبة الدهون (8) ═══
@@ -801,7 +1038,7 @@ def build_battery(foods_by_slug: dict) -> list:
         add("ai-job", True, lang, task, expected, S_WATER)
     add("ai-job", False, "ar",
         "ما القاعدة التي يعتمدها المتتبع في حساب الماء؟",
-        "35 مل لكل كيلوجرام من وزن الجسم مع تثبيت النتيجة داخل النطاق الآمن 2000–4500 مل يوميًا.",
+        f"{w_kg} مل لكل كيلوجرام من وزن الجسم مع تثبيت النتيجة داخل النطاق الآمن {w_lo}–{w_hi} مل يوميًا.",
         S_WATER)
     add("ai-job", False, "en",
         "How much does one tap of the cup button log in the water tracker?",
@@ -811,20 +1048,22 @@ def build_battery(foods_by_slug: dict) -> list:
     # ═══ الأداة 6 — مخطط الوجبات (8) ═══
     add("ai-job", False, "ar",
         "طلبت خطة وجبات على 800 سعرة فرفضها المخطط — لماذا؟",
-        "نطاق السعرات المقبول عدد صحيح بين 1200 و4000 سعرة (DEMO_CALORIE_MIN/MAX) — ما دونه أو فوقه يُرفض.",
+        f"نطاق السعرات المقبول عدد صحيح بين {cal_min} و{cal_max} سعرة (DEMO_CALORIE_MIN/MAX) — ما دونه أو فوقه يُرفض.",
         S_MEAL)
     add("ai-job", True, "ar",
         "طلبت يومًا على 2000 سعرة — ما نطاق الإغلاق المقبول لمجموع اليوم؟",
-        "يجب أن يغلق اليوم ضمن ±20% من المطلوب: من 1600 إلى 2400 سعرة (قانون الشكل الصادق — DEMO_CALORIE_DRIFT).",
+        f"يجب أن يغلق اليوم ضمن ±{int(cal_drift*100)}% من المطلوب: من {int(2000*(1-cal_drift))} إلى "
+        f"{int(2000*(1+cal_drift))} سعرة (قانون الشكل الصادق — DEMO_CALORIE_DRIFT).",
         S_MEAL)
     add("ai-job", False, "ar",
         "كم وجبة يولّدها مخطط الوجبات في اليوم؟",
-        "من 3 إلى 5 وجبات (فطور/غداء/عشاء/سناك)، ولا يُقبل أقل من 3 ولا أكثر من 5.",
+        f"من {mc_lo} إلى {mc_hi} وجبات (فطور/غداء/عشاء/سناك)، ولا يُقبل أقل من {mc_lo} ولا أكثر من {mc_hi}.",
         S_MEAL)
     add("ai-job", False, "en",
         "What are the hard rules for items inside each generated meal?",
-        "2 to 6 items per meal per the prompt (validator accepts 1–8), every item 5 to 600 grams "
-        "(oils and fats by the spoonful), and each meal's quantities are for that meal alone — never the whole day.",
+        f"2 to 6 items per meal per the prompt (validator accepts 1–8), every item {gp_lo} to {gp_hi} grams "
+        f"per the prompt (validator accepts {gv_lo}–{gv_hi}; oils and fats by the spoonful), and each meal's "
+        "quantities are for that meal alone — never the whole day.",
         S_MEAL)
     add("ai-job", False, "ar",
         "من أي طعام يبني المخطط الوجبات؟",
@@ -836,7 +1075,8 @@ def build_battery(foods_by_slug: dict) -> list:
         S_MEAL)
     add("ai-job", True, "ar",
         "هل يثبت المخطط توزيع الماكروز أم يتركه حرًا؟",
-        "يثبته على توزيعات النظام المختار — نفس توزيعات حاسبة الماكروز في الموقع (مثلًا المتوازن 30/40/30) — فيلتزم النموذج بها.",
+        "يثبته على توزيع النظام المختار من توزيعات الموقع المعتمدة (مثلًا المتوازن 30/40/30 من حاسبة الماكروز؛ "
+        "والنباتي 25/50/25 توزيع المصفوفة وحدها) — فيلتزم النموذج بها.",
         S_MEAL)
     add("ai-job", False, "en",
         "Does the meal planner accept a plan whose day total drifts 25% from the requested calories?",
@@ -846,11 +1086,17 @@ def build_battery(foods_by_slug: dict) -> list:
     # ═══ الأداة 7 — مخطط التمرين (8) ═══
     add("ai-job", False, "ar",
         "طلبت أسبوعًا من 4 أيام تدريبية فأعطاني المخطط 5 — هل هذا مقبول؟",
-        "لا — يجب أن يحمل الأسبوع عدد الأيام المطلوب بالضبط (قانون الصدق في الشكل)، وكل يوم 3 إلى 8 تمارين.",
+        f"لا — يجب أن يحمل الأسبوع عدد الأيام المطلوب بالضبط (قانون الصدق في الشكل)، "
+        f"وكل يوم من {rules['day_ex_min']} إلى {rules['day_ex_max']} تمارين.",
         S_WO)
+    wsv_lo, wsv_hi = rules["wo_sets_validator"]
+    wrv_lo, wrv_hi = rules["wo_reps_validator"]
+    wsp_lo, wsp_hi = rules["wo_sets_prompt"]
+    wrp_lo, wrp_hi = rules["wo_reps_prompt"]
     add("ai-job", False, "en",
         "What are the set and rep constraints for exercises in a generated workout plan?",
-        "Every exercise 2 to 6 sets (validator accepts integers 1–10) of 5 to 20 reps — a single number or a range like \"8-12\" (validator accepts 1–50).",
+        f"Every exercise {wsp_lo} to {wsp_hi} sets (validator accepts integers {wsv_lo}–{wsv_hi}) of "
+        f"{wrp_lo} to {wrp_hi} reps — a single number or a range like \"8-12\" (validator accepts {wrv_lo}–{wrv_hi}).",
         S_WO)
     add("ai-job", False, "ar",
         "بأي ترتيب توضع التمارين داخل اليوم الواحد؟",
@@ -919,27 +1165,27 @@ def build_battery(foods_by_slug: dict) -> list:
     # ═══ الأداة 9 — فحص الخطط (8) ═══
     add("ai-job", True, "ar",
         "ما نطاق الإغلاق المقبول لمجموع وجبات الخطة الكاملة مقارنة بهدف السعرات؟",
-        "ضمن ±25% من الهدف المحسوب خادميًا (planDriftTolerance = 0.25).",
+        f"ضمن ±{pd_pct}% من الهدف المحسوب خادميًا (planDriftTolerance = {rules['plan_drift']}).",
         S_PLANVAL)
     add("ai-job", True, "ar",
         "استبدلت وجبة — ما الحد الذي يجب أن تلتزمه الوجبة البديلة؟",
-        "ضمن ±20% من هدف الوجبة (mealDriftTolerance = 0.2).",
+        f"ضمن ±{md_pct}% من هدف الوجبة (mealDriftTolerance = {rules['meal_drift']}).",
         S_PLANVAL)
     add("ai-job", True, "en",
         "A single food item is regenerated — how close must it stay to the original?",
-        "Within ±15% of the original item's calories (the food-item drift tolerance).",
+        f"Within ±{id_pct}% of the original item's calories (the food-item drift tolerance).",
         S_PLANVAL)
     add("ai-job", True, "en",
         "A swap alternative is proposed next to a primary meal — what must it close against?",
-        "Within ±10% of the primary meal's recomputed calorie total (the calorie-equivalence gate law).",
+        f"Within ±{ad_pct}% of the primary meal's recomputed calorie total (the calorie-equivalence gate law).",
         S_PLANVAL)
     add("ai-job", True, "ar",
-        "لماذا يعاد فحص ±25% على مستوى اليوم بعد كل تجسيد استبدال؟",
-        "لأن كل استبدال يرتكز على مجموع الوجبة الحالي فيمكن أن «يزحف» تدريجيًا (ratchet)؛ ففحص ميزانية اليوم بعد التجسيد يمنع تجاوز ±25% تراكميًا.",
+        f"لماذا يعاد فحص ±{pd_pct}% على مستوى اليوم بعد كل تجسيد استبدال؟",
+        f"لأن كل استبدال يرتكز على مجموع الوجبة الحالي فيمكن أن «يزحف» تدريجيًا (ratchet)؛ ففحص ميزانية اليوم بعد التجسيد يمنع تجاوز ±{pd_pct}% تراكميًا.",
         S_PLANVAL)
     add("ai-job", True, "ar",
         "رسالة رفض استبدال وجبة — ماذا تعرض؟",
-        "تعرض أرقام ميزانية اليوم الفعلية: مجموع وجبات اليوم بالسعرات ونطاق ±25% المسموح، كي يفهم المستخدم سبب الرفض رقميًا.",
+        f"تعرض أرقام ميزانية اليوم الفعلية: مجموع وجبات اليوم بالسعرات ونطاق ±{pd_pct}% المسموح، كي يفهم المستخدم سبب الرفض رقميًا.",
         S_PLANVAL)
     add("ai-job", False, "en",
         "Where do the plan's food nutrition numbers come from?",
@@ -947,7 +1193,7 @@ def build_battery(foods_by_slug: dict) -> list:
         S_PLANVAL)
     add("ai-job", False, "ar",
         "تمارين الخطة — من أين تُطابق أسماؤها؟",
-        "تطابق ضد مكتبة الموقع نفسها (868 تمرينًا) على أدلة الرموز، وما لم يطابق يبقى سطرًا عاديًا بلا صورة أو رابط مختلق.",
+        f"تطابق ضد مكتبة الموقع نفسها ({n_exercises} تمرينًا) على أدلة الرموز، وما لم يطابق يبقى سطرًا عاديًا بلا صورة أو رابط مختلق.",
         S_MATCH)
 
     # ═══ الأداة 10 — البحث الغذائي (8) ═══
@@ -1125,41 +1371,46 @@ def build_battery(foods_by_slug: dict) -> list:
         S_EVOSAF)
 
     # ═══ 3) مجموعة plans (~25) ═══
+    ms = rules["matrix_splits"]
+    def _sp(s):
+        return f"{s['protein']}/{s['carbs']}/{s['fat']}"
     add("plans", False, "ar",
         "ما نطاق السعرات الذي يقبله مخطط الوجبات التجريبي؟",
-        "عدد صحيح بين 1200 و4000 سعرة (DEMO_CALORIE_MIN/MAX) — ما خلافه يُرفض بصريحة خطأ صريحة.",
+        f"عدد صحيح بين {cal_min} و{cal_max} سعرة (DEMO_CALORIE_MIN/MAX) — ما خلافه يُرفض بصريحة خطأ صريحة.",
         S_MEAL)
     add("plans", True, "ar",
         "خطة يوم على 1800 سعرة — ما نطاق الإغلاق المقبول؟",
-        "ضمن ±20%: من 1440 إلى 2160 سعرة (قانون الشكل الصادق للمخطط التجريبي).",
+        f"ضمن ±{int(cal_drift*100)}%: من {int(1800*(1-cal_drift))} إلى {int(1800*(1+cal_drift))} سعرة (قانون الشكل الصادق للمخطط التجريبي).",
         S_MEAL)
     add("plans", False, "en",
         "How many meals must a generated demo day carry?",
-        "3 to 5 meals — fewer or more is rejected.",
+        f"{mc_lo} to {mc_hi} meals — fewer or more is rejected.",
         S_MEAL)
     add("plans", False, "en",
         "What weight range applies to each generated food item?",
-        "5 to 600 grams per item (oils and fats by the spoonful).",
+        f"{gp_lo} to {gp_hi} grams per item per the prompt (the validator accepts {gv_lo}–{gv_hi}; oils and fats by the spoonful).",
         S_MEAL)
     add("plans", False, "ar",
         "كم مستوى سعريًا في مصفوفة الخطط الغذائية وما هي؟",
-        "ستة مستويات: 1200 و1500 و1800 و2000 و2500 و3000 سعرة.",
+        f"ستة مستويات: {' و'.join(str(x) for x in rules['diet_levels'])} سعرة.",
         S_MATRIX)
     add("plans", False, "ar",
         "ما الأنظمة الأربعة في مصفوفة الخطط؟ وكم خلية تنتج؟",
-        "متوازن وعالي البروتين وكيتو ونباتي — 6 مستويات × 4 أنظمة = 24 صفحة خطة مستقلة.",
+        f"متوازن وعالي البروتين وكيتو ونباتي — {len(rules['diet_levels'])} مستويات × {len(ms)} أنظمة = "
+        f"{len(rules['diet_levels']) * len(ms)} صفحة خطة مستقلة.",
         S_MATRIX)
     add("plans", True, "ar",
         "ما توزيعات الماكروز للأنظمة الأربعة في المصفوفة؟",
-        "متوازن 30/40/30 · عالي البروتين 45/35/20 · كيتو 25/5/70 · نباتي 25/50/25 (بروتين/كارب/دهون) — تطابق توزيعات حاسبة الماكروز.",
+        f"متوازن {_sp(ms['balanced'])} · عالي البروتين {_sp(ms['high-protein'])} · كيتو {_sp(ms['keto'])} (بروتين/كارب/دهون) "
+        f"— الثلاثة تطابق توزيعات حاسبة الماكروز؛ ونباتي {_sp(ms['vegetarian'])} توزيع المصفوفة وحدها.",
         S_MATRIX)
     add("plans", True, "ar",
         "بأي دقة تغلق خلية من خلايا المصفوفة على مستواها السعري؟",
-        "يحسب اليوم المحسوب ليغلق ضمن ±10 سعرة من المستوى المطلوب.",
+        f"يحسب اليوم المحسوب ليغلق ضمن ±{rules['matrix_closure']} سعرة من المستوى المطلوب.",
         S_MATRIX)
     add("plans", False, "en",
         "Which macro preset exists only in the diet-plan matrix and not in the macro calculator?",
-        "Vegetarian 25/50/25 — documented as the matrix-only preset.",
+        f"Vegetarian {_sp(ms['vegetarian'])} — documented as the matrix-only preset.",
         S_MATRIX)
     add("plans", False, "ar",
         "هل يحتاج المخطط المجاني تسجيل حساب؟",
@@ -1167,23 +1418,23 @@ def build_battery(foods_by_slug: dict) -> list:
         S_MATRIX)
     add("plans", True, "ar",
         "استبدال وجبة داخل خطة — ما الحد الملزم؟",
-        "±20% من هدف الوجبة (mealDriftTolerance)، وإلا رفض مع رسالة تعرض أرقام ميزانية اليوم.",
+        f"±{md_pct}% من هدف الوجبة (mealDriftTolerance)، وإلا رفض مع رسالة تعرض أرقام ميزانية اليوم.",
         S_PLANVAL)
     add("plans", True, "ar",
         "بدائل الاستبدال المعروضة بجانب الوجبة الأساسية — ما قانونها؟",
-        "تكافؤ سعري ضمن ±10% من مجموع الوجبة الأساسية معاد الحسابه (قانون بوابة صارم على كل بديل).",
+        f"تكافؤ سعري ضمن ±{ad_pct}% من مجموع الوجبة الأساسية معاد الحسابه (قانون بوابة صارم على كل بديل).",
         S_PLANVAL)
     add("plans", True, "ar",
         "إعادة توليد صنف غذائي واحد داخل وجبة — ما حد الانحراف؟",
-        "±15% من سعرات الصنف الأصلي.",
+        f"±{id_pct}% من سعرات الصنف الأصلي.",
         S_PLANVAL)
     add("plans", True, "en",
         "What is the planDriftTolerance for a whole plan's meals-sum?",
-        "±25% of the server-computed target — the full plan's meals must close inside it.",
+        f"±{pd_pct}% of the server-computed target — the full plan's meals must close inside it.",
         S_PLANVAL)
     add("plans", True, "ar",
         "ما قانون منع «الزحف» في استبدالات اليوم؟",
-        "إعادة فحص ±25% على مستوى اليوم بعد كل تجسيد استبدال: كل استبدال يرتكز على الحالي فيمكن التراكم، وفحص اليوم يوقف التجاوز.",
+        f"إعادة فحص ±{pd_pct}% على مستوى اليوم بعد كل تجسيد استبدال: كل استبدال يرتكز على الحالي فيمكن التراكم، وفحص اليوم يوقف التجاوز.",
         S_PLANVAL)
     add("plans", True, "ar",
         "الأرقام الغذائية في الخطط — من أين إلزاميًا؟",
@@ -1191,15 +1442,16 @@ def build_battery(foods_by_slug: dict) -> list:
         S_PLANVAL)
     add("plans", False, "ar",
         "أسبوع تدريبي مطلوب على 3 أيام — كم يومًا يجب أن يحمله؟",
-        "بالضبط 3 أيام (لا أكثر ولا أقل) — وكل يوم من 3 إلى 8 تمارين.",
+        f"بالضبط 3 أيام (لا أكثر ولا أقل) — وكل يوم من {rules['day_ex_min']} إلى {rules['day_ex_max']} تمارين.",
         S_WO)
     add("plans", False, "en",
         "What exercises-per-day range does the workout validator enforce?",
-        "3 to 8 exercises per day; the prompt steers to 4–6 with every exercise 2–6 sets of 5–20 reps.",
+        f"{rules['day_ex_min']} to {rules['day_ex_max']} exercises per day; the prompt steers to 4–6 with every exercise "
+        f"{wsp_lo}–{wsp_hi} sets of {wrp_lo}–{wrp_hi} reps.",
         S_WO)
     add("plans", False, "ar",
         "ما حدود المجموعات والتكرارات في مدقق مخطط التمرين؟",
-        "المجموعات عدد صحيح 1–10، والتكرارات 1–50 أو نطاق مثل «8-12».",
+        f"المجموعات عدد صحيح {wsv_lo}–{wsv_hi}، والتكرارات {wrv_lo}–{wrv_hi} أو نطاق مثل «8-12».",
         S_WO)
     add("plans", False, "ar",
         "أي حركة تفتح اليوم التدريبي؟",
@@ -1207,7 +1459,8 @@ def build_battery(foods_by_slug: dict) -> list:
         S_WO)
     add("plans", False, "ar",
         "ما نطاقات حجم التدريب الأسبوعي في القانون؟",
-        "10–20 مجموعة أسبوعيًا لكل عضلة كبيرة (صدر/ظهر/أرجل/أكتاف) و6–12 لكل عضلة صغيرة (ذراعان/سمانة/كور).",
+        f"{rules['wo_volume_large'][0]}–{rules['wo_volume_large'][1]} مجموعة أسبوعيًا لكل عضلة كبيرة (صدر/ظهر/أرجل/أكتاف) "
+        f"و{rules['wo_volume_small'][0]}–{rules['wo_volume_small'][1]} لكل عضلة صغيرة (ذراعان/سمانة/كور).",
         S_WO)
     add("plans", False, "ar",
         "متى تقبل المطابقة بين تمرين مولّد ومدخل مكتبة؟",
@@ -1254,8 +1507,7 @@ def build_battery(foods_by_slug: dict) -> list:
         S_EDLAW)
     add("constitution", True, "ar",
         "اذكر نطاقات الجهات المسموح الاستشهاد بها.",
-        "who.int · ncbi.nlm.nih.gov · pubmed.ncbi.nlm.nih.gov · ods.od.nih.gov · nccih.nih.gov · cdc.gov · mayoclinic.org · "
-        "acsm.org · issn-online.org · nsca.com · health.gov · nasm.org · acefitness.org · eatright.org — 14 نطاقًا.",
+        f"{' · '.join(rules['domains'])} — {len(rules['domains'])} نطاقًا.",
         S_EDLAW)
     add("constitution", True, "ar",
         "هل يجوز خلق دراسة وإحصاء لدعم نقطة في المقال؟",
@@ -1271,7 +1523,7 @@ def build_battery(foods_by_slug: dict) -> list:
         S_EDLAW)
     add("constitution", True, "ar",
         "هل قسم الأسئلة الشائعة اختياري في مقالات المدونة؟",
-        "إلزامي في نهاية كل مقال: 4–7 أسئلة تخدم نية البحث الفعلية للمقال تحديدًا — لا أسئلة عامة ولا حشو جانبي.",
+        f"إلزامي في نهاية كل مقال: {rules['faq_min']}–{rules['faq_max']} أسئلة تخدم نية البحث الفعلية للمقال تحديدًا — لا أسئلة عامة ولا حشو جانبي.",
         S_EDLAW)
     add("constitution", True, "ar",
         "ما الصيغة الحرفية لقسم الأسئلة الشائعة؟",
@@ -1279,7 +1531,7 @@ def build_battery(foods_by_slug: dict) -> list:
         S_EDLAW)
     add("constitution", True, "ar",
         "مقال ينتهي بثلاثة أسئلة شائعة فقط — هل يجتاز بوابة النشر؟",
-        "لا — القانون العددي 4–7 أسئلة (EDITORIAL_FAQ_COUNT_RANGE) ينطبق على مولّد المسار ومولّد الاحتياط معًا.",
+        f"لا — القانون العددي {rules['faq_min']}–{rules['faq_max']} أسئلة (EDITORIAL_FAQ_COUNT_RANGE) ينطبق على مولّد المسار ومولّد الاحتياط معًا.",
         S_EDLAW)
     add("constitution", False, "ar",
         "مقال فيه فقرات تحفيزية عامة وتكرار للنصيحة ذاتها بأقسام متعددة — ما القاعدة؟",
@@ -1335,24 +1587,47 @@ def build_battery(foods_by_slug: dict) -> list:
 
 # ────────────────────────── التحقق النهائي ──────────────────────────
 
-def verify_outputs(out_root: str, counts: dict, battery: list) -> list:
-    """تحققات ما بعد الإنتاج: أعداد/صلاحية/فصل/فردية المعرّفات."""
+EVAL_ID_RE = re.compile(r"^EVAL-v0-\d{3}$")
+UTC_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+SOURCE_PATH_RE = re.compile(r"^alkemos-aws@[0-9a-f]+:(src/[^\s#]+)")
+BATTERY_GROUPS = {"ai-job", "evo", "plans", "constitution"}
+
+
+def normalize_cmp(s: str) -> str:
+    """تطبيع للمقارنة في فحص الفصل المحسّن (مراجعة دفعة 8 — الملاحظة 3):
+    حالة اللاتينية الصغرى + إزالة التشكيل والتطويل + توحيد الألف والياء
+    والتاء المربوطة وعلامات الترقيم العربية + طي المسافات — يكشف التطابق
+    شبه الحرفي الذي يفلت من المقارنة الحرفية، دون إذابة نصين مختلفين."""
+    s = s.casefold()
+    s = re.sub(r"[\u064B-\u0652\u0670\u0640]", "", s)  # تشكيل + تطويل
+    s = re.sub("[أإآٱ]", "ا", s)
+    s = s.replace("ى", "ي").replace("ة", "ه")
+    s = s.replace("،", ",").replace("؛", ";").replace("؟", "?")
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+def verify_outputs(out_root: str, counts: dict, battery: list, derived: dict) -> list:
+    """تحققات ما بعد الإنتاج (محسّنة بمراجعة دفعة 8 — الملاحظة 3):
+    مطابقة تامة للأعداد الفعلية المتوقعة + صلاحية المخطط + فردية المعرفات
+    عبر كل الملفات + فصل تدريب/تقييم بثلاث طبقات + سلامة الاستشهادات."""
     errors = []
+    stats = {"records_scanned": 0, "cited_paths_ok": 0, "sep_exact": 0,
+             "sep_normalized": 0, "sep_answers": 0, "sep_containment": 0}
 
-    # 1) الأعداد المرجعية
-    if counts["exercises_ar"] < EXPECTED["exercises"] * 2:  # على الأقل قالبان لكل تمرين
-        errors.append(f"exercises_ar too small: {counts['exercises_ar']}")
-    if counts["exercises_en"] < EXPECTED["exercises"] * 2:
-        errors.append(f"exercises_en too small: {counts['exercises_en']}")
-    if counts["foods_ar"] != EXPECTED["foods"]:
-        errors.append(f"foods_ar != {EXPECTED['foods']}: {counts['foods_ar']}")
-    if counts["programs"] != EXPECTED["programs"] * 2 + EXPECTED["diet_levels"] * EXPECTED["diet_systems"] * 2:
-        errors.append(f"programs count mismatch: {counts['programs']}")
-    n = len(battery)
-    if not (EXPECTED["battery_min"] <= n <= EXPECTED["battery_max"]):
-        errors.append(f"battery size {n} outside 100-200")
+    # 1) الأعداد الفعلية المتوقعة — مطابقة تامة (لا حدود دنيا)
+    for key, label in [("exercises_ar", "exercises_ar_records"),
+                       ("exercises_en", "exercises_en_records"),
+                       ("foods_ar", "foods"),
+                       ("programs", "programs_records")]:
+        if counts[key] != EXPECTED[label]:
+            errors.append(f"{key} != {EXPECTED[label]} (documented): {counts[key]}")
+    # اشتقاق داخلي: عدد سجلات التمارين من حضور حقول الخطوات
+    for key, der in [("exercises_ar", "exercises_ar"), ("exercises_en", "exercises_en")]:
+        if counts[key] != derived[der]:
+            errors.append(f"{key} != derived-from-fields {derived[der]}: {counts[key]}")
 
-    # 2) صلاحية JSON وفردية المعرفات + الفصل الصارم
+    # 2) صلاحية JSON وفردية المعرفات + سلامة الاستشهاد + الفصل الصارم
     def load_jsonl(path):
         recs = []
         with open(path, "r", encoding="utf-8") as f:
@@ -1368,51 +1643,121 @@ def verify_outputs(out_root: str, counts: dict, battery: list) -> list:
         "datasets/v0.1/sft-foods-ar.jsonl",
         "datasets/v0.1/sft-programs.jsonl",
     ]
-    all_ids = set()
+    eval_path = os.path.join(out_root, "evaluation/alkemos-eval-v0.jsonl")
+    eval_recs = load_jsonl(eval_path)
+
+    all_ids = set()          # معرفات التدريب (لفحص التفرّد والتصادم مع البطارية)
+    train_user_texts = []    # (المعرّف، الملف، النص الخام، النص المطبّع)
+    train_assistant_norm = []
     for rel in ds_paths:
-        recs = load_jsonl(os.path.join(out_root, rel))
-        for r in recs:
+        for r in load_jsonl(os.path.join(out_root, rel)):
+            stats["records_scanned"] += 1
             if r["id"] in all_ids:
                 errors.append(f"duplicate id {r['id']} in {rel}")
             all_ids.add(r["id"])
             if "source" not in r or "messages" not in r:
                 errors.append(f"missing fields in {rel}: {r['id']}")
+                continue
             if len(r["messages"]) != 2:
                 errors.append(f"bad messages len in {rel}: {r['id']}")
-    eval_path = os.path.join(out_root, "evaluation/alkemos-eval-v0.jsonl")
-    eval_recs = load_jsonl(eval_path)
+            # سلامة الاستشهاد: مسار المصدر داخل الملفات المجلوبة
+            m = SOURCE_PATH_RE.match(r.get("source", ""))
+            if not m or m.group(1) not in SOURCE_FILES:
+                errors.append(f"bad/unknown source path in {rel}: {r['id']} → {r.get('source')}")
+            else:
+                stats["cited_paths_ok"] += 1
+            for msg in r["messages"]:
+                if msg["role"] == "user":
+                    train_user_texts.append((r["id"], rel, msg["content"],
+                                             normalize_cmp(msg["content"])))
+                elif msg["role"] == "assistant":
+                    train_assistant_norm.append((r["id"], rel,
+                                                 normalize_cmp(msg["content"])))
+
+    # مخطط سجلات البطارية: معرف تسلسلي سليم + حقول بأنواعها
     eval_ids = set()
-    for r in eval_recs:
+    for i, r in enumerate(eval_recs, 1):
+        if not EVAL_ID_RE.match(r.get("id", "")) or r["id"] != f"EVAL-v0-{i:03d}":
+            errors.append(f"eval id broken at position {i}: {r.get('id')}")
         if r["id"] in eval_ids:
             errors.append(f"duplicate eval id {r['id']}")
         eval_ids.add(r["id"])
         for field in ("id", "group", "critical", "lang", "task", "expected", "source", "added_utc"):
             if field not in r:
                 errors.append(f"eval record missing {field}: {r.get('id')}")
+        if r.get("group") not in BATTERY_GROUPS:
+            errors.append(f"eval bad group: {r.get('id')} → {r.get('group')}")
+        if r.get("lang") not in ("ar", "en"):
+            errors.append(f"eval bad lang: {r.get('id')} → {r.get('lang')}")
+        if not isinstance(r.get("critical"), bool):
+            errors.append(f"eval critical not bool: {r.get('id')}")
+        if not str(r.get("task", "")).strip() or not str(r.get("expected", "")).strip():
+            errors.append(f"eval empty task/expected: {r.get('id')}")
+        if not UTC_DATE_RE.match(str(r.get("added_utc", ""))):
+            errors.append(f"eval bad added_utc: {r.get('id')} → {r.get('added_utc')}")
+        m = SOURCE_PATH_RE.match(r.get("source", ""))
+        if not m or m.group(1) not in SOURCE_FILES:
+            errors.append(f"eval bad/unknown source path: {r.get('id')} → {r.get('source')}")
 
-    # الفصل الصارم: لا سجل بطارية حرفيًا داخل بيانات التدريب
-    eval_contents = {json.dumps({k: r[k] for k in ('task',)}, ensure_ascii=False) for r in eval_recs}
-    for rel in ds_paths:
-        for r in load_jsonl(os.path.join(out_root, rel)):
-            user_texts = {json.dumps({'task': m["content"]}, ensure_ascii=False)
-                          for m in r["messages"] if m["role"] == "user"}
-            overlap = eval_contents & user_texts
-            if overlap:
-                errors.append(f"BATTERY LEAK into {rel}: {len(overlap)} exact task match(es)")
+    # تصادم المعرفات بين البطارية والتدريب (فصل الهوية)
+    id_collisions = eval_ids & all_ids
+    if id_collisions:
+        errors.append(f"ID collision train/battery: {sorted(id_collisions)}")
 
-    # توازن اللغتين في البطارية (قاعدة ثنائية اللغة)
-    langs = [r["lang"] for r in eval_recs]
-    if langs.count("ar") < 60 or langs.count("en") < 30:
-        errors.append(f"battery language balance off: ar={langs.count('ar')}, en={langs.count('en')}")
+    # الفصل الصارم — ثلاث طبقات (الملاحظة 3):
+    #   (1) تطابق حرفي للمهام · (2) تطابق بعد التطبيع (مهام + إجابات)
+    #   (3) احتواء جزئي بعد التطبيع (الأقصر ≥40 محرفًا) في الاتجاهين
+    eval_tasks_exact = {r["task"] for r in eval_recs}
+    eval_tasks_norm = {normalize_cmp(r["task"]) for r in eval_recs}
+    eval_exp_norm = {normalize_cmp(r["expected"]) for r in eval_recs}
+    eval_tasks_long = {t for t in eval_tasks_norm if len(t) >= 40}
+    for rec_id, rel, raw, nt in train_user_texts:
+        if raw in eval_tasks_exact:
+            errors.append(f"BATTERY LEAK (exact task) into {rel}: {rec_id}")
+            stats["sep_exact"] += 1
+            continue
+        if nt in eval_tasks_norm:
+            errors.append(f"BATTERY LEAK (normalized task) into {rel}: {rec_id}")
+            stats["sep_normalized"] += 1
+            continue
+        if len(nt) >= 40:
+            for et in eval_tasks_long:
+                if et in nt or nt in et:
+                    errors.append(f"BATTERY LEAK (task containment) into {rel}: {rec_id}")
+                    stats["sep_containment"] += 1
+                    break
+    # إجابات البطارية لا تظهر كإجابات تدريب (مطابقة مطبّعة)
+    for rec_id, rel, na in train_assistant_norm:
+        if na in eval_exp_norm:
+            errors.append(f"BATTERY LEAK (normalized expected→assistant) into {rel}: {rec_id}")
+            stats["sep_answers"] += 1
+
+    # 3) أعداد البطارية المثبتة في التوثيق — مطابقة تامة
+    n = len(eval_recs)
+    if n != EXPECTED["battery_total"]:
+        errors.append(f"battery total {n} != documented {EXPECTED['battery_total']}")
+    if not (EXPECTED["battery_min"] <= n <= EXPECTED["battery_max"]):
+        errors.append(f"battery size {n} outside spec range 100-200")
     groups = {}
     for r in eval_recs:
         groups[r["group"]] = groups.get(r["group"], 0) + 1
-    if set(groups) != {"ai-job", "evo", "plans", "constitution"}:
+    if groups != EXPECTED["battery_groups"]:
+        errors.append(f"battery groups {groups} != documented {EXPECTED['battery_groups']}")
+    if set(groups) != BATTERY_GROUPS:
         errors.append(f"unexpected battery groups: {sorted(groups)}")
     crit = sum(1 for r in eval_recs if r["critical"])
-    if crit < 40:
-        errors.append(f"too few critical cases: {crit}")
+    if crit != EXPECTED["battery_critical"]:
+        errors.append(f"battery critical {crit} != documented {EXPECTED['battery_critical']}")
+    langs = [r["lang"] for r in eval_recs]
+    if langs.count("ar") != EXPECTED["battery_ar"] or langs.count("en") != EXPECTED["battery_en"]:
+        errors.append(f"battery langs ar={langs.count('ar')}, en={langs.count('en')} "
+                      f"!= documented ar={EXPECTED['battery_ar']}, en={EXPECTED['battery_en']}")
 
+    # 4) الأعداد المتوقعة أُبلغ عنها (سجل الفحص)
+    print(f"      [فصل] سجلات مفحوصة={stats['records_scanned']} · "
+          f"تطابق حرفي={stats['sep_exact']} · تطابق مطبّع={stats['sep_normalized']} · "
+          f"احتواء={stats['sep_containment']} · إجابات={stats['sep_answers']}")
+    print(f"      [استشهاد] مسارات موثقة داخل SOURCE_FILES={stats['cited_paths_ok']}")
     return errors
 
 
@@ -1439,6 +1784,9 @@ def main() -> int:
     programs = extract_export(sources["src/lib/workout-programs.ts"], "WORKOUT_PROGRAMS")
     levels = extract_export(sources["src/lib/diet-plan-matrix.ts"], "DIET_LEVELS")
     systems = extract_export(sources["src/lib/diet-plan-matrix.ts"], "DIET_SYSTEMS")
+    # خرائط العرض الإنجليزية للمصفوفة (§12.27) — لاستكمال الإنجليزية (الملاحظة 1)
+    meal_name_en = extract_export(sources["src/lib/diet-plan-matrix.ts"], "MEAL_NAME_EN")
+    food_names_en = extract_export(sources["src/lib/diet-plan-matrix.ts"], "FOOD_NAMES_EN")
 
     # تسميات الفئات/المعدات/المستويات من exercises.ts
     category_labels = extract_export(sources["src/lib/exercises.ts"], "CATEGORY_LABELS")
@@ -1454,17 +1802,39 @@ def main() -> int:
     print(f"      تمارين={len(exercises)} أطعمة={len(foods)} برامج={len(programs)} "
           f"مستويات={len(levels)} أنظمة={len(systems)}")
 
+    # تثبيت القواعد والثوابت المنقولة من المصدر (الملاحظة 2) — قبل أي توليد
+    rules = collect_source_rules(sources)
+    rules["diet_levels"] = list(levels)
+    rules["matrix_splits"] = {s["slug"]: s["split"] for s in systems}
+    # قانون المصدر نفسه: كل مفتاح طعام/وجبة في المصفوفة له اسم عرض إنجليزي
+    matrix_food_keys = set()
+    matrix_meal_names = set()
+    for s in systems:
+        for meal in s["meals"]:
+            matrix_meal_names.add(meal["name"])
+            matrix_food_keys.update(it["food"] for it in meal["items"])
+            if meal.get("flex"):
+                matrix_food_keys.add(meal["flex"])
+    missing_foods = matrix_food_keys - set(food_names_en)
+    missing_meals = matrix_meal_names - set(meal_name_en)
+    if missing_foods or missing_meals:
+        raise ValueError("EN display maps missing keys — foods: "
+                         f"{sorted(missing_foods)}, meals: {sorted(missing_meals)}")
+    print(f"      تثبيت القواعد: {sum(1 for _ in rules['domains'])} نطاقًا · "
+          f"خرائط إنجليزية كاملة ({len(matrix_food_keys)} صنفًا و{len(matrix_meal_names)} وجبة)")
+
     print("[3/6] توليد أمثلة SFT…")
     ex_ar, ex_en = sft_exercises(exercises, muscle_labels, category_labels,
                                  equipment_labels, level_labels)
     foods_ar = sft_foods_ar(foods, tag_labels)
-    prog_records = sft_programs(programs, levels, systems)
+    prog_records = sft_programs(programs, levels, systems, meal_name_en, food_names_en,
+                                matrix_closure=rules["matrix_closure"])
     print(f"      exercises-ar={len(ex_ar)} exercises-en={len(ex_en)} "
           f"foods-ar={len(foods_ar)} programs={len(prog_records)}")
 
-    print("[4/6] بناء البطارية (القيم المتوقعة محسوبة)…")
+    print("[4/6] بناء البطارية (القيم المحسوبة بالكود + القواعد المثبتة من المصدر)…")
     foods_by_slug = {f["slug"]: f for f in foods}
-    battery = build_battery(foods_by_slug)
+    battery = build_battery(foods_by_slug, rules, len(exercises))
     print(f"      battery={len(battery)} حالة "
           f"(critical={sum(1 for c in battery if c['critical'])})")
 
@@ -1486,14 +1856,20 @@ def main() -> int:
         "exercises_ar": len(ex_ar), "exercises_en": len(ex_en),
         "foods_ar": len(foods_ar), "programs": len(prog_records),
     }
-    errors = verify_outputs(out_root, counts, battery)
+    # العدد المشتق من حضور الحقول (قانون لا انحراف صامت بين التوثيق والبيانات)
+    derived = {
+        "exercises_ar": sum(2 + (1 if ex.get("instructionsAr") else 0) for ex in exercises),
+        "exercises_en": sum(2 + (1 if ex.get("instructionsEn") else 0) for ex in exercises),
+    }
+    errors = verify_outputs(out_root, counts, battery, derived)
     if errors:
         print("\nفشل التحقق:")
         for e in errors:
             print("  -", e)
         return 1
-    print("\nنجح التحقق الكامل: الأعداد مطابقة، JSON صحيح، معرفات فردية، "
-          "فصل البطارية عن التدريب مؤكد، توازن اللغتين سليم.")
+    print("\nنجح التحقق الكامل: الأعداد مطابقة تمامًا للموثق، JSON صحيح، معرفات فردية "
+          "بلا تصادم، فصل البطارية عن التدريب مؤكد بثلاث طبقات (حرفي/مطبّع/احتواء)، "
+          "وكل استشهاد داخل ملفات المصدر المجلوبة.")
     return 0
 
 

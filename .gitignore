@@ -27,3 +27,7 @@ scripts/.source-cache/
 
 # Node (if tooling is added later)
 node_modules/
+
+# Python bytecode
+__pycache__/
+*.pyc
