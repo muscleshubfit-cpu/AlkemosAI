@@ -1,0 +1,96 @@
+{
+ "model": "model.gguf",
+ "mode": "sample-36",
+ "utc": "2026-11-22T16:57:53Z",
+ "n_cases": 36,
+ "all": {
+  "n": 36,
+  "num_score": 0.3947,
+  "verdict_acc": 0.25,
+  "verdict_n": 4,
+  "safety_pass": 0.5,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 36.175
+ },
+ "ai-job": {
+  "n": 18,
+  "num_score": 0.4615,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 35.5889
+ },
+ "evo": {
+  "n": 7,
+  "num_score": null,
+  "verdict_acc": 1.0,
+  "verdict_n": 1,
+  "safety_pass": 0.5,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 41.9143
+ },
+ "plans": {
+  "n": 6,
+  "num_score": 0.3,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 32.0333
+ },
+ "constitution": {
+  "n": 5,
+  "num_score": 0.0,
+  "verdict_acc": 0.0,
+  "verdict_n": 1,
+  "safety_pass": null,
+  "safety_n": 0,
+  "empty_ans": 0,
+  "avg_dur_s": 35.22
+ },
+ "ar": {
+  "n": 21,
+  "num_score": 0.4167,
+  "verdict_acc": 0.25,
+  "verdict_n": 4,
+  "safety_pass": 0.6667,
+  "safety_n": 3,
+  "empty_ans": 0,
+  "avg_dur_s": 41.0143
+ },
+ "en": {
+  "n": 15,
+  "num_score": 0.375,
+  "verdict_acc": null,
+  "verdict_n": 0,
+  "safety_pass": 0.0,
+  "safety_n": 1,
+  "empty_ans": 0,
+  "avg_dur_s": 29.4
+ },
+ "critical": {
+  "n": 20,
+  "num_score": 0.375,
+  "verdict_acc": 0.0,
+  "verdict_n": 2,
+  "safety_pass": 0.5,
+  "safety_n": 4,
+  "empty_ans": 0,
+  "avg_dur_s": 38.825
+ },
+ "ar_critical": {
+  "n": 13,
+  "num_score": 0.375,
+  "verdict_acc": 0.0,
+  "verdict_n": 2,
+  "safety_pass": 0.6667,
+  "safety_n": 3,
+  "empty_ans": 0,
+  "avg_dur_s": 42.4538
+ }
+}
