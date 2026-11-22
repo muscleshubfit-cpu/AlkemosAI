@@ -1,0 +1,96 @@
+> # سير تقييم M2 على البطارية — تشغيل يدوي (GGUF مكمّم على عدّاء مجاني)
+> #
+> # القواعد (SECURITY §8.6 النمط المعتمد):
+> #   - تشغيل يدوي فقط (workflow_dispatch) — لا جدولة ولا دفع/PR.
+> #   - بلا أي أسرار إطلاقًا: نماذج عامة من HF تُنزَّل قراءة-فقط بلا توكن (R-35).
+> #   - لا تدريب أوزان ولا توليد إنتاجي ولا مساس بإنتاج Alkemos (D-11/ADR-0022).
+> #   - النتائج تُرفع كـ artifact وتُلحق أيضًا بالمستودع تحت evaluation/results/m2/
+> #     (الغرض: توثيق النتائج الموقعة — evaluation/README ق4).
+> #   - الفحوص: فشل التشغيل يخفق البناء (لا نتائج صامتة ناقصة).
+
+name: m2-battery-gguf
+on:
+  workflow_dispatch:
+    inputs:
+      model_alias:
+        description: "وسم النموذج في النتائج (مثل Jais-3-7B-Q4_K_M)"
+        required: true
+      hf_file_url:
+        description: "رابط ملف GGUF الكامل من HF (عام)"
+        required: true
+      n_ctx:
+        description: "سياق (افتراضي 4096)"
+        required: false
+        default: "4096"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: m2-battery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  battery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Checkout (قراءة-فقط للمستودع)
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install llama-cpp-python (CPU wheel)
+        run: |
+          pip install --quiet cmake
+          pip install --quiet --no-cache-dir --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu llama-cpp-python
+          python -c "import llama_cpp; print('llama-cpp-python OK')"
+
+      - name: Download GGUF (عام، بلا توكن)
+        run: |
+          mkdir -p /tmp/m2models
+          curl -sL --retry 4 --retry-delay 5 -C - -o "/tmp/m2models/model.gguf" "${{ inputs.hf_file_url }}"
+          ls -lh /tmp/m2models/model.gguf
+
+      - name: Run battery (stratified sample 36)
+        run: |
+          mkdir -p evaluation/results/m2
+          python3 scripts/m2_run_battery.py \
+            --channel gguf \
+            --model /tmp/m2models/model.gguf \
+            --sample-n 36 \
+            --max-tokens 320 \
+            --out-dir evaluation/results/m2 \
+            --tag "${{ inputs.model_alias }}"
+
+      - name: Run trainer probes
+        run: |
+          python3 scripts/m2_run_battery.py \
+            --channel gguf \
+            --model /tmp/m2models/model.gguf \
+            --probes \
+            --max-tokens 420 \
+            --out-dir evaluation/results/m2 \
+            --tag "${{ inputs.model_alias }}"
+
+      - name: Commit signed results (evaluation/results/m2 only)
+        run: |
+          git config user.name "alkemosai-m2-runner"
+          git config user.email "runner@alkemosai.local"
+          git add evaluation/results/m2/
+          if git diff --cached --quiet; then
+            echo "no new results to commit"
+          else
+            git commit -m "eval(M2 آلي): نتائج بطارية ومجسات ${{ inputs.model_alias }} — عينة طبقية 36 + مجسات المدرب (سير m2-battery-gguf، بلا أسرار)"
+            git push
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: m2-results-${{ inputs.model_alias }}
+          path: evaluation/results/m2/
+          retention-days: 90
