@@ -12,7 +12,7 @@ m2_run_battery.py — منظومة تقييم M2 لبطارية AlkemosAI الم
     حصص المجموعات تناسبية (ai-job 18 · evo 7 · plans 6 · constitution 5 = 36)
     والاختيال داخل كل خلية بتوزيع منتظم على ترتيب المعرف — حتمي 100% (بلا عشوائية).
   - بروتوكول موحد: نفس system prompt للجميع + temperature=0 + حد رموز ثابت.
-  - نموذج التفكير: يُزال ما بين <think>...</think> قبل التصحيح؛ إن فرغت الإجابة يعاد التشغيل
+  - نموذج التفكير: يُزال ما بين  💭...💭 قبل التصحيح؛ إن فرغت الإجابة يعاد التشغيل
     بلاحقة " /no_think" مرة واحدة (توثق في الحقل retry_no_think).
   - التصحيح الآلي (أرقام/اتجاه الحكم/إشارة السلامة) + حفظ النصوص كاملة كأدلة للحكم النوعي.
 
@@ -38,8 +38,8 @@ def normalize_text(t: str) -> str:
     t = t.replace("٫", ".").replace("٬", ",")
     return t
 
-def strip_think(t: str):
-    return re.sub(r"<think>.*?</think>", "", t, flags=re.S).strip()
+def strip_think(t: str) -> str:
+    return re.sub(r"💭.*?💭", "", t, flags=re.S).strip()
 
 def extract_numbers(t: str):
     """أرقام ≥10 (غربية بعد التطبيع) مع رفض السنوات الظاهرة كتواريخ معزولة؟ لا — نُبقي كل ≥10 (منهج ثابت)."""
@@ -187,7 +187,7 @@ def run_case(ch, case, allow_nothink_retry=True):
     raw, ntok, dur = ch.chat(messages)
     retry = False
     ans = strip_think(raw)
-    if (("<think>" in raw and not ans) or (not ans.strip())) and allow_nothink_retry:
+    if (("💭" in raw and not ans) or (not ans.strip())) and allow_nothink_retry:
         messages[-1]["content"] = case["task"] + " /no_think"
         raw, ntok, dur = ch.chat(messages)
         retry = True
