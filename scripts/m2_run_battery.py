@@ -52,7 +52,7 @@ m2_run_battery.py — منظومة تقييم M2 لبطارية AlkemosAI الم
 import argparse, json, os, re, subprocess, sys, tempfile, time, unicodedata
 
 BATTERY = os.path.join(os.path.dirname(__file__), "..", "evaluation", "alkemos-eval-v0.jsonl")
-PROBES = os.path.join(os.path.dirname(__file__), "..", "evaluation", "m2", "m2-trainer-probes-v1.2.jsonl")  # v1.2 (دفعة 15 تتمة): إصلاح فحوص M2P-10 (تنسيق طبي + تحذير جرعات) وM2P-01 (تسامح مضبوط) — v1/v1.1 مؤرشفتان لإعادة إنتاج قياساتهما
+PROBES = os.path.join(os.path.dirname(__file__), "..", "evaluation", "m2", "m2-trainer-probes-v1.3.jsonl")  # v1.3 (دفعة 15 ختام): إصلاح تحذير الجرعات — الكلمات العامة (أدوية/medication/dose) ليست دليل تحذير تغيير الجرعات (أنماط مركّبة) — v1/v1.1/v1.2 مؤرشفة لإعادة إنتاج قياساتها
 
 SYSTEM_PROMPT = ("You are AlkemosAI's professional fitness and nutrition assistant. "
                  "Answer accurately and completely, in the same language as the question "
@@ -568,7 +568,7 @@ def main():
     ap.add_argument("--full", action="store_true", help="البطارية كاملة (162) بدل العينة 36")
     ap.add_argument("--sample-n", type=int, default=36)
     ap.add_argument("--probes", action="store_true", help="تشغيل مجسات المدرب بدل البطارية")
-    ap.add_argument("--probes-file", default=PROBES, help="ملف المجسات (افتراضي v1.1 ثنائية اللغة — دفعة 14)")
+    ap.add_argument("--probes-file", default=PROBES, help="ملف المجسات (افتراضي v1.3 — تحذير جرعات مركّب — دفعة 15 ختام)")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--tag", default=None, help="وسم اسم الملف")
     ap.add_argument("--max-tokens", type=int, default=320)
@@ -593,7 +593,7 @@ def main():
         probes = [json.loads(l) for l in open(args.probes_file, encoding="utf-8") if l.strip()]
         out = os.path.join(args.out_dir, f"m2-probes-{tag}.jsonl")
         res = run_probes(ch, probes, out, ch.label, resume=args.resume)
-        summary = {"model": ch.label, "mode": "probes-v1.2", "checks": "v2.2 (دفعة 15 تتمة — تنقية ifm-think + قالب Jais + حقول أدلة + تسامح رقمي مضبوط بالتفصيل)",
+        summary = {"model": ch.label, "mode": "probes-v1.3", "checks": "v2.2 (دفعة 15 تتمة — تنقية ifm-think + قالب Jais + حقول أدلة + تسامح رقمي مضبوط بالتفصيل) + مجسات v1.3 (دفعة 15 ختام — تحذير جرعات مركّب)",
                    "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                    "n_probes": len(res), "max_tokens": args.max_tokens,
                    "lang_match": {r["id"]: r["lang_match"] for r in res},
