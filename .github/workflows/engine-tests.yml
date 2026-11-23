@@ -1,0 +1,60 @@
+name: "M4 — اختبارات محرك الذاكرة والتعلم (engine/)"
+
+# دفعة 16 — M4-ذاكرة-1: كل اختبارات المحرك تعمل مع كل دفع يمس engine/ أو
+# اختباراته أو البطاقات — بلا أسرار إطلاقًا (وضعية R-35: سير عام بلا أسرار)
+# وبصلاحيات قراءة فقط. لا يمس هذا السير أي سير من سيور M2 القائمة.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "engine/**"
+      - "scripts/test_engine_*.py"
+      - "scripts/test_m4_*.py"
+      - "scripts/m4_*.py"
+      - "memory/cards/**"
+      - ".github/workflows/engine-tests.yml"
+  pull_request:
+    paths:
+      - "engine/**"
+      - "scripts/test_engine_*.py"
+      - "scripts/test_m4_*.py"
+      - "scripts/m4_*.py"
+      - "memory/cards/**"
+      - ".github/workflows/engine-tests.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-tests
+  cancel-in-progress: false
+
+jobs:
+  engine-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: استنساخ المستودع
+        uses: actions/checkout@v4
+
+      - name: إعداد Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: تشغيل اختبارات المحرك (163 فحصًا)
+        run: |
+          set -euo pipefail
+          for t in \
+            scripts/test_engine_memory.py \
+            scripts/test_engine_knowledge.py \
+            scripts/test_engine_learning.py \
+            scripts/test_engine_gateway_gex.py \
+            scripts/test_engine_exporter.py \
+            scripts/test_m4_learning_cycle.py
+          do
+            echo "════ $t ════"
+            python "$t"
+          done

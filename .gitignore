@@ -31,3 +31,8 @@ node_modules/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# M4 — بيانات مخزن المستوى أ (ذاكرة العملاء): تعيش خارج المستودع نهائيًا
+# (حارس JsonlMemoryStore يرفض المسارات داخل شجرة git — هذه حراسة إضافية)
+data/memory/
+engine-data/
