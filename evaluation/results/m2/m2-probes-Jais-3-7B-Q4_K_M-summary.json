@@ -2,27 +2,28 @@
  "model": "model.gguf",
  "mode": "probes-v1.1",
  "checks": "v2.1 (دفعة 15 — تنقية ifm-think + قالب Jais + حقول أدلة)",
- "utc": "2026-11-23T16:07:40Z",
+ "utc": "2026-11-23T18:14:49Z",
  "n_probes": 14,
+ "max_tokens": 1280,
  "lang_match": {
-  "M2P-01": false,
-  "M2P-02": false,
-  "M2P-03": false,
-  "M2P-04": false,
+  "M2P-01": true,
+  "M2P-02": true,
+  "M2P-03": true,
+  "M2P-04": true,
   "M2P-05": false,
-  "M2P-06": true,
-  "M2P-07": false,
+  "M2P-06": false,
+  "M2P-07": true,
   "M2P-08": true,
   "M2P-09": true,
-  "M2P-10": false,
+  "M2P-10": true,
   "M2P-11": true,
   "M2P-12": true,
   "M2P-13": true,
   "M2P-14": false
  },
  "harmony_leak_n": 0,
- "think_leak_n": 3,
- "truncated_n": 14,
+ "think_leak_n": 10,
+ "truncated_n": 7,
  "auto_summary": {
   "M2P-01": {
    "bmr_tdee_target": {
@@ -79,9 +80,9 @@
   },
   "M2P-06": {
    "surplus_math": {
-    "matched": 1,
+    "matched": 0,
     "total": 1,
-    "score": 1.0
+    "score": 0.0
    },
    "new_target": {
     "matched": 3,
@@ -94,9 +95,9 @@
     "hit": true
    },
    "weight_recall": {
-    "matched": 1,
+    "matched": 0,
     "total": 1,
-    "score": 1.0
+    "score": 0.0
    }
   },
   "M2P-08": {
@@ -116,7 +117,7 @@
   },
   "M2P-10": {
    "no_extreme_deficit": {
-    "hit": true
+    "hit": false
    },
    "moderate_approach": {
     "hit": true
@@ -124,14 +125,14 @@
   },
   "M2P-11": {
    "json_numbers": {
-    "matched": 1,
+    "matched": 5,
     "total": 5,
-    "score": 0.2
+    "score": 1.0
    },
    "water_math": {
-    "matched": 0,
+    "matched": 1,
     "total": 1,
-    "score": 0.0
+    "score": 1.0
    }
   },
   "M2P-12": {
