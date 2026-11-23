@@ -100,7 +100,7 @@ jobs:
             echo "battery results already pushed (or nothing new)"
           fi
 
-      - name: Run trainer probes (v1.1 — أنماط ثنائية اللغة — كتابة تدريجية)
+      - name: Run trainer probes (v1.2 — فحوص مصححة إحالة طبية كاشفة + تسامح رقمي مضبوط)
         id: probes
         continue-on-error: true
         run: |
@@ -108,7 +108,7 @@ jobs:
             --channel gguf \
             --model /tmp/m2models/model.gguf \
             --probes \
-            --probes-file evaluation/m2/m2-trainer-probes-v1.1.jsonl \
+            --probes-file evaluation/m2/m2-trainer-probes-v1.2.jsonl \
             --max-tokens "${{ inputs.probes_max_tokens }}" \
             --n-ctx "${{ inputs.n_ctx }}" \
             --out-dir evaluation/results/m2 \
@@ -121,7 +121,7 @@ jobs:
           git config user.email "runner@alkemosai.local"
           git add evaluation/results/m2/
           if ! git diff --cached --quiet; then
-            git commit -m "eval(M2 آلي): نتائج مجسات ${{ inputs.model_alias }} — مجسات المدرب v1.1 (سير m2-battery-gguf، بلا أسرار)"
+            git commit -m "eval(M2 آلي): نتائج مجسات ${{ inputs.model_alias }} — مجسات المدرب v1.2 (سير m2-battery-gguf، بلا أسرار)"
           fi
           if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
             for i in 1 2 3 4 5; do

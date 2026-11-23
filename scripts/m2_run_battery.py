@@ -52,7 +52,7 @@ m2_run_battery.py — منظومة تقييم M2 لبطارية AlkemosAI الم
 import argparse, json, os, re, subprocess, sys, tempfile, time, unicodedata
 
 BATTERY = os.path.join(os.path.dirname(__file__), "..", "evaluation", "alkemos-eval-v0.jsonl")
-PROBES = os.path.join(os.path.dirname(__file__), "..", "evaluation", "m2", "m2-trainer-probes-v1.1.jsonl")  # v1.1 (دفعة 14): أنماط ثنائية اللغة — v1 الأصلية تبقى للأرشفة/إعادة الإنتاج
+PROBES = os.path.join(os.path.dirname(__file__), "..", "evaluation", "m2", "m2-trainer-probes-v1.2.jsonl")  # v1.2 (دفعة 15 تتمة): إصلاح فحوص M2P-10 (تنسيق طبي + تحذير جرعات) وM2P-01 (تسامح مضبوط) — v1/v1.1 مؤرشفتان لإعادة إنتاج قياساتهما
 
 SYSTEM_PROMPT = ("You are AlkemosAI's professional fitness and nutrition assistant. "
                  "Answer accurately and completely, in the same language as the question "
@@ -141,18 +141,54 @@ def extract_numbers(t: str):
             out.append(round(v, 1))
     return out
 
-def num_recall(expected: str, output: str):
-    """نسبة أرقام expected (≥10) الواردة في output بتسامح max(1, 2%)."""
+def _num_tolerance(e: float, tol_pct: float = 2.0, tol_abs=None):
+    """تسامح مطابقة رقم واحد — الافتراضي التاريخي: max(1, 2%).
+    (دفعة 15 — تتمة): الخيار tol_abs (رقم أو قائمة موازية لـexpected) يثبت تسامحًا مطلقًا
+    لكل رقم — الدافع بالقياس: في M2P-01 كان تسامح 2% على 2833 يساوي ±56.7 سعرة فيُمرر
+    TDEE مكتوب 2828 كـ«مطابق»، ويسمح للهدف 2333 أن يطابَق بذيل نطاق 2300، والماكروز
+    175 أن يطابَق صدفة بالطول 178 — فحوص دقيقة مطلوبة للأهداف السعرية (اختبارات T29/T30)."""
+    if tol_abs is not None:
+        return float(tol_abs)
+    return max(1.0, round(abs(e) * (tol_pct / 100.0), 1))
+
+def num_recall(expected: str, output: str, tol_pct: float = 2.0, tol_abs=None):
+    """نسبة أرقام expected (≥10) الواردة في output.
+    التسامح الافتراضي التاريخي: max(1, 2%) — وtol_abs يضيّقه إلى قيمة مطلقة لكل رقم
+    (متوازٍ مع أرقام expected — فحوص v2.2 للمجسات الدقيقة مثل M2P-01).
+    التوافق الخلفي: البطارية وكل قواعد المجسات غير المحددة تسلوكها كما كان حرفيًا."""
     exp_nums = extract_numbers(expected)
     if not exp_nums:
         return None, 0, 0
+    abs_list = None
+    if tol_abs is not None:
+        abs_list = tol_abs if isinstance(tol_abs, (list, tuple)) else [tol_abs] * len(exp_nums)
     out_nums = extract_numbers(output)
     matched = 0
-    for e in exp_nums:
-        tol = max(1.0, round(abs(e) * 0.02, 1))
+    for i, e in enumerate(exp_nums):
+        ta = abs_list[i] if abs_list and i < len(abs_list) else (abs_list[-1] if abs_list else None)
+        tol = _num_tolerance(e, tol_pct, ta)
         if any(abs(o - e) <= tol for o in out_nums):
             matched += 1
     return matched / len(exp_nums), matched, len(exp_nums)
+
+def num_match_detail(expected: str, output: str, tol_pct: float = 2.0, tol_abs=None):
+    """تفصيل المطابقة رقمًا رقمًا (دفعة 15 — تتمة): لكل رقم من expected — القيمة المتوقعة،
+    التسامح المطبق، وأول قيمة في output طابقته (أو None) — ليمكن فحص «النجاح» ذاته
+    بدل الاكتفاء بنسبة مجمعة قد تخفي تطابقًا صدفيًا أو تسامحًا فضفاضًا."""
+    exp_nums = extract_numbers(expected)
+    if not exp_nums:
+        return []
+    abs_list = None
+    if tol_abs is not None:
+        abs_list = tol_abs if isinstance(tol_abs, (list, tuple)) else [tol_abs] * len(exp_nums)
+    out_nums = extract_numbers(output)
+    detail = []
+    for i, e in enumerate(exp_nums):
+        ta = abs_list[i] if abs_list and i < len(abs_list) else (abs_list[-1] if abs_list else None)
+        tol = _num_tolerance(e, tol_pct, ta)
+        got = next((o for o in out_nums if abs(o - e) <= tol), None)
+        detail.append({"exp": e, "tol": tol, "got": got})
+    return detail
 
 REJECT_PAT = re.compile(r"مرفوض|يُرفض|يرفض|رفض|لا يَ?قبل|لا يقبل|غير مطابق|مخالف", re.I)
 ACCEPT_PAT = re.compile(r"مقبول|يُقبل|يقبل|قبول|مطابق|صحيح|سليم|اجتاز", re.I)
@@ -432,7 +468,7 @@ def summarize(results, model_label, mode_desc):
     def mmean(xs): 
         xs = [x for x in xs if x is not None]
         return round(sum(xs) / len(xs), 4) if xs else None
-    s = {"model": model_label, "mode": mode_desc, "checks": "v2.1 (دفعة 15 — تنقية ifm-think + قالب Jais + حقول أدلة)",
+    s = {"model": model_label, "mode": mode_desc, "checks": "v2.2 (دفعة 15 تتمة — تنقية ifm-think + قالب Jais + حقول أدلة + تسامح رقمي مضبوط بالتفصيل)",
          "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
          "n_cases": len(results)}
     for cut, name in [(lambda r: True, "all"),
@@ -490,9 +526,23 @@ def run_probes(ch, probes, out_path, model_label, resume=False):
                 continue
             kind = rule.get("kind")
             if kind == "num":
-                _, m, t = num_recall(rule["expected"], ans)
+                # (دفعة 15 — تتمة): تسامح مضبوط اختياري لكل قاعدة (tol_abs مطلق متوازٍ
+                # مع الأرقام، أو tol_pct نسبي) + تفصيل المطابقة رقمًا رقمًا — الافتراضي
+                # بلا هذه الحقول يبقى السلوك التاريخي حرفيًا (توافق v1.1 والأقدم).
+                if rule.get("tol_abs") is not None:
+                    ta = [float(x) for x in str(rule["tol_abs"]).split()] \
+                        if isinstance(rule["tol_abs"], str) else rule["tol_abs"]
+                    _, m, t = num_recall(rule["expected"], ans, tol_abs=ta)
+                    det = num_match_detail(rule["expected"], ans, tol_abs=ta)
+                elif rule.get("tol_pct") is not None:
+                    tp = float(rule["tol_pct"])
+                    _, m, t = num_recall(rule["expected"], ans, tol_pct=tp)
+                    det = num_match_detail(rule["expected"], ans, tol_pct=tp)
+                else:
+                    _, m, t = num_recall(rule["expected"], ans)
+                    det = num_match_detail(rule["expected"], ans)
                 auto[k] = {"matched": m, "total": t,
-                           "score": (m / t if t else None)}
+                           "score": (m / t if t else None), "detail": det}
             elif kind == "any_keyword":
                 pats = [re.compile(x, re.I) for x in rule["patterns"]]
                 auto[k] = {"hit": any(px.search(ans) for px in pats)}
@@ -543,7 +593,7 @@ def main():
         probes = [json.loads(l) for l in open(args.probes_file, encoding="utf-8") if l.strip()]
         out = os.path.join(args.out_dir, f"m2-probes-{tag}.jsonl")
         res = run_probes(ch, probes, out, ch.label, resume=args.resume)
-        summary = {"model": ch.label, "mode": "probes-v1.1", "checks": "v2.1 (دفعة 15 — تنقية ifm-think + قالب Jais + حقول أدلة)",
+        summary = {"model": ch.label, "mode": "probes-v1.2", "checks": "v2.2 (دفعة 15 تتمة — تنقية ifm-think + قالب Jais + حقول أدلة + تسامح رقمي مضبوط بالتفصيل)",
                    "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                    "n_probes": len(res), "max_tokens": args.max_tokens,
                    "lang_match": {r["id"]: r["lang_match"] for r in res},

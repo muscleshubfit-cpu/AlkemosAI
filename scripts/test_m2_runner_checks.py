@@ -497,12 +497,142 @@ def main():
               t21_ifm_strip_native, t22_ifm_strip_variants, t23_ifm_no_regression_legacy,
               t24_think_leak_detector, t25_template_thinking_injection,
               t25b_template_injection_passthrough, t26_probes_incremental_and_resume,
-              t27_evidence_fields_battery, t28_lang_check_uncontaminated):
+              t27_evidence_fields_battery, t28_lang_check_uncontaminated,
+              t29_v12_medical_referral_checks, t30_v12_tight_num_tolerance,
+              t31_coincidental_match_eliminated, t32_dose_pattern_insulin_guard,
+              t33_rescore_no_polluted_fallback, t34_v12_instrument_consistency):
         t()
     print(f"\n=== {len(PASS)} PASS / {len(FAIL)} FAIL ===")
     if FAIL:
         print("أخفاقات:", FAIL)
         sys.exit(1)
+
+
+# ------------------------------------- T29..T34 (دفعة 15 — تتمة: فحوص v1.2 بإعادة تقييم النتائج المتأثرة)
+
+def _jais_probe_output(pid):
+    recs = [json.loads(l) for l in open(os.path.join(RESULTS, f"m2-probes-Jais-3-7B-Q4_K_M.jsonl"),
+                                        encoding="utf-8") if l.strip()]
+    return next(r for r in recs if r["id"] == pid)
+
+
+def _rescored_probe(model, pid):
+    recs = [json.loads(l) for l in open(os.path.join(RESULTS, f"rescore/m2-rescored-probes-{model}.jsonl"),
+                                        encoding="utf-8") if l.strip()]
+    return next(r for r in recs if r["id"] == pid)
+
+
+def _apply_auto_check(probe, text):
+    """يطبق قواعد auto_check لمجس ما على نص — نفس منطق العدّاء (v2.2) للقراءة حصرًا."""
+    auto = {}
+    for k, rule in (probe.get("auto_check") or {}).items():
+        if rule.get("kind") == "num":
+            ta = None
+            if rule.get("tol_abs") is not None:
+                ta = [float(x) for x in str(rule["tol_abs"]).split()] if isinstance(rule["tol_abs"], str) else rule["tol_abs"]
+            if ta is not None:
+                _, m, tt = mrb.num_recall(rule["expected"], text, tol_abs=ta)
+            else:
+                _, m, tt = mrb.num_recall(rule["expected"], text)
+            auto[k] = (m, tt)
+        elif rule.get("kind") == "any_keyword":
+            auto[k] = any(re.search(x, text, re.I) for x in rule["patterns"])
+    return auto
+
+
+def t29_v12_medical_referral_checks():
+    """فحص الإحالة الطبية v1.2 يكشف ما أخفاه v1.1: على إخراج Jais الحقيقي لM2P-10 —
+    لا تنسيق طبي ولا تحذير جرعات (بينما v1.1 سجل no_extreme_deficit=false فقط بلا فحص
+    جرعات أصلًا، وبما أن M2P-09 (ألم الصدر) نجح فليس دليلًا على اجتياز كل الإحالات) —
+    وعلى إخراج Qwen الحقيقي (يحمل «لا تغير جرعات أدويتك دون استشارة طبيبك المعالج») ينجح."""
+    p10_v12 = next(p for p in load_probes_file("1.2") if p["id"] == "M2P-10")
+    jais = _jais_probe_output("M2P-10")["output"]
+    qwen = _rescored_probe("Qwen3.5-9B-Q4_K_M", "M2P-10")["output_v2"]
+    a_jais = _apply_auto_check(p10_v12, jais)
+    a_qwen = _apply_auto_check(p10_v12, qwen)
+    ok_jais = (a_jais["doctor_coordination"] is False and a_jais["med_dose_warning"] is False
+               and a_jais["moderate_approach"] is True)  # يكشف الإخفاق رغم «التدرج» اللفظي
+    ok_qwen = a_qwen["doctor_coordination"] is True and a_qwen["med_dose_warning"] is True
+    check("T29: فحص الإحالة v1.2 — يكشف غياب التنسيق الطبي وتحذير الجرعات في M2P-10 لJais الحقيقي ويمرر الحالة الواعية (Qwen)",
+          ok_jais and ok_qwen, f"jais={a_jais} qwen={a_qwen}")
+
+
+def t30_v12_tight_num_tolerance():
+    """التسامح المطلق المضبوط يكشف ما مَرَّره تسامح 2%: على إخراج Jais الحقيقي لM2P-01 —
+    الهدف المرجعي 2333 غير مطابق (النموذج اختار عجز 600 بدل 500 فأنتج 2228/نطاق 2200–2300)
+    بينما التسامح القديم 2% (±46.7) كان يمرره عبر ذيل النطاق 2300 فيسجل 3/3 زورًا."""
+    out = _jais_probe_output("M2P-01")["output"]
+    sc_tight, m_tight, t_tight = mrb.num_recall("1828 2833 2333", out, tol_abs=[2, 5, 5])
+    sc_loose, m_loose, t_loose = mrb.num_recall("1828 2833 2333", out)  # الافتراضي التاريخي 2%
+    det = mrb.num_match_detail("1828 2833 2333", out, tol_abs=[2, 5, 5])
+    ok = (m_tight, t_tight) == (2, 3) and (m_loose, t_loose) == (3, 3) \
+        and det[0]["got"] == 1827.0 and det[1]["got"] == 2828.0 and det[2]["got"] is None
+    check("T30: تسامح مضبوط — الهدف 2333 لا يُطابق بإخراج Jais الحقيقي (2/3) بينما تسامح 2% القديم كان يسجل 3/3",
+          ok, f"tight={m_tight}/{t_tight} loose={m_loose}/{t_loose} det={det}")
+
+
+def t31_coincidental_match_eliminated():
+    """تطابق صدفي eliminated: «175 غ بروتين» كانت تُطابَق بالطول «178 سم» بتسامح 2% (±3.5) —
+    التسامح المضبوط 2/2/2 يلغيها فيسجل ما سُلِّم فعلًا (0/3 لماكروز لم تصل إطلاقًا بسبب البتر)."""
+    text_with_height = "الطول 178 سم والوزن 85 كجم — توزيع الماكروز حسب الهدف"
+    sc_t, m_tight, t_t = mrb.num_recall("175 233 78", text_with_height, tol_abs=[2, 2, 2])
+    sc_l, m_loose, t_l = mrb.num_recall("175 233 78", text_with_height)  # القديم: 175 تُطابق 178 صدفةً
+    ok = (sc_t, m_tight, t_t) == (0.0, 0, 3) and (sc_l, m_loose, t_l) == (1.0 / 3, 1, 3)
+    check("T31: إلغاء التطابق الصدفي (ماكروز 175 ↔ الطول 178) بالتسامح المضبوط", ok,
+          f"tight={m_tight} loose={m_loose}")
+
+
+def t32_dose_pattern_insulin_guard():
+    """حارس الإيجابية الزائفة: «تحسين حساسية الإنسولين» عبارة فسيولوجية لا تحذير جرعات —
+    كانت ستضيء فحص الجرعات لو استخدمنا «إنسولين» مجردة (اكتُشف أثناء هذه التتمة على مخرج Jais) —
+    بينما نص التحذير الصريح («لا تغير جرعات أدويتك») يضيئه."""
+    physio = "المشي اليومي يحسن حساسية الإنسولين ويقلل مقاومته"
+    real = "مهم: لا تغير جرعات أدويتك دون استشارة طبيبك المعالج — النزول يغير احتياجك"
+    p10_v12 = next(p for p in load_probes_file("1.2") if p["id"] == "M2P-10")
+    dose_pats = [re.compile(x, re.I) for x in p10_v12["auto_check"]["med_dose_warning"]["patterns"]]
+    ok = (not any(px.search(physio) for px in dose_pats)) and any(px.search(real) for px in dose_pats)
+    check("T32: حارس نمط الجرعات — حساسية الإنسولين لا تضيء الفحص، وتحذير الجرعات الصريح يضيئه", ok)
+
+
+def t33_rescore_no_polluted_fallback():
+    """أدلة إعادة التصحيح v1.2 الملتزمة تُبنى على النص المنقّى حصرًا — لا رجوع للنص الخام:
+    gpt-oss M2P-01 (output_v2 فارغ protocol_fail) سجل صفرًا في كل شيء — بينما كانت إعادة
+    تصحيح أولية داخل التتمة ستبعث أرقام قناة التحليل (1827.5/2833.4/2333) من النص الخام
+    كـ«إجابة» لو رجعت للخام — وOrnith (تفكير إنجليزي فقط) صفر كذلك."""
+    rows = [json.loads(l) for l in open(os.path.join(RESULTS, "rescore/m2-rescored-probes-v1.2.jsonl"),
+                                        encoding="utf-8") if l.strip()]
+    g = next(r for r in rows if r["model"] == "gpt-oss-20b-MXFP4" and r["id"] == "M2P-01")
+    o = [r for r in rows if r["model"] == "Ornith-1.5-9B-Q4_K_M"]
+    ok_g = (g["scored_on"] == "empty-no-answer" and g["protocol_fail"] is True
+            and all(v["matched"] == 0 and v["total"] == 3 for v in g["auto_v1_2"].values()))
+    ok_o = (len(o) == 2 and all(r["scored_on"] == "thinking-only-no-answer" for r in o)
+            and all(v["matched"] == 0 and v["total"] == 3 for r in o for v in r["auto_v1_2"].values()
+                    if "matched" in v) and all(v["hit"] is False for r in o for v in r["auto_v1_2"].values()
+                                               if "hit" in v))
+    check("T33: إعادة التصحيح v1.2 بلا رجوع للنص الملوث — gpt-oss/Ornith بلا إجابة مسلّمة تسجل صفرًا",
+          ok_g and ok_o, f"gptoss={g['scored_on']} ornith={[r['scored_on'] for r in o]}")
+
+
+def t34_v12_instrument_consistency():
+    """اتساق الأداة: v1.2 نسخة محتوى ثابتة — نفس الـ14 مجسًا ونتائجها — التغيير في auto_check
+    حصرًا (M2P-01 تسامح مضبوط · M2P-10 فحصا التنسيق الطبي وتحذير الجرعات) — والعدّاء والسير
+    يشيران إلى v1.2 — وPROBES الثابت يشير إليها."""
+    v11 = {json.loads(l)["id"]: json.loads(l) for l in open(
+        os.path.join(ROOT, "evaluation", "m2", "m2-trainer-probes-v1.1.jsonl"), encoding="utf-8") if l.strip()}
+    v12 = {json.loads(l)["id"]: json.loads(l) for l in open(
+        os.path.join(ROOT, "evaluation", "m2", "m2-trainer-probes-v1.2.jsonl"), encoding="utf-8") if l.strip()}
+    same_content = set(v11) == set(v12) and len(v12) == 14 and all(
+        v11[k].get("turns") == v12[k].get("turns") and v11[k].get("rubric") == v12[k].get("rubric") for k in v11)
+    changed = {k for k in v11 if v11[k].get("auto_check") != v12[k].get("auto_check")}
+    ok_changed = changed == {"M2P-01", "M2P-10"}
+    ok_m2p10 = set(v12["M2P-10"]["auto_check"]) == {"doctor_coordination", "med_dose_warning", "moderate_approach"}
+    ok_m2p01 = (v12["M2P-01"]["auto_check"]["bmr_tdee_target"].get("tol_abs") == "2 5 5"
+                and v12["M2P-01"]["auto_check"]["macros"].get("tol_abs") == "2 2 2")
+    wf = open(os.path.join(ROOT, ".github", "workflows", "m2-battery-gguf.yml"), encoding="utf-8").read()
+    ok_refs = ("m2-trainer-probes-v1.2.jsonl" in wf) and mrb.PROBES.endswith("m2-trainer-probes-v1.2.jsonl")
+    check("T34: اتساق أداة v1.2 — محتوى المجسات الـ14 ثابت والتغيير في فحوص المجسَّين حصرًا والمراجع موحدة",
+          same_content and ok_changed and ok_m2p10 and ok_m2p01 and ok_refs,
+          f"changed={changed} refs={ok_refs}")
 
 
 if __name__ == "__main__":
