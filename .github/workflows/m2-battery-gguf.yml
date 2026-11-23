@@ -7,6 +7,9 @@
 #   - النتائج تُرفع كـ artifact وتُلحق أيضًا بالمستودع تحت evaluation/results/m2/
 #     (الغرض: توثيق النتائج الموقعة — evaluation/README ق4).
 #   - الفحوص: فشل التشغيل يخفق البناء (لا نتائج صامتة ناقصة).
+#   - (دفعة 14) فحوص v2 سارية تلقائيًا (سلامة ثنائية مصنفة · لغة الرد · تنقية harmony ·
+#     اكتمال · فواصل آلاف) + مجسات v1.1 ثنائية اللغة + تمرير n_ctx الذي كان معرفًا
+#     كمدخل وغير مستخدم (أُصلح هذه الدفعة).
 
 name: m2-battery-gguf
 on:
@@ -63,16 +66,19 @@ jobs:
             --model /tmp/m2models/model.gguf \
             --sample-n 36 \
             --max-tokens 320 \
+            --n-ctx "${{ inputs.n_ctx }}" \
             --out-dir evaluation/results/m2 \
             --tag "${{ inputs.model_alias }}"
 
-      - name: Run trainer probes
+      - name: Run trainer probes (v1.1 — أنماط ثنائية اللغة — دفعة 14)
         run: |
           python3 scripts/m2_run_battery.py \
             --channel gguf \
             --model /tmp/m2models/model.gguf \
             --probes \
+            --probes-file evaluation/m2/m2-trainer-probes-v1.1.jsonl \
             --max-tokens 420 \
+            --n-ctx "${{ inputs.n_ctx }}" \
             --out-dir evaluation/results/m2 \
             --tag "${{ inputs.model_alias }}"
 

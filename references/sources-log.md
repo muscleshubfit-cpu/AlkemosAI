@@ -155,4 +155,19 @@
 
 **قياسات المشروع نفسه في هذه الدفعة:** قناة zai المجانية (glm-4-plus): بطارية عينة-36 + 14 مجسًا كاملة (أول قياس فعلي للقناة) مع توثيق إعادة محاولة 429 — النتائج في `evaluation/results/m2/` + المراجعة النوعية `evaluation/results/m2/m2-probes-qualitative-review-v1.md` + تقرير الاكتشاف `docs/02-models/m2-discovery-report.md` + دراسة الموارد `docs/03-infrastructure/free-compute-resources-study.md`.
 
+## 11. تحقق دفعة 14 — روابط GGUF لمرشحي القياس (كلها مقيسة حية 2026-11-23 UTC — ADR-0022)
+
+قياسات HF API + ترويسات تنزيل (`HEAD` على `resolve/main` — `x-linked-size` بالبايت) لتثبيت روابط ملفات GGUF للمرشحين قبل أي تشغيل (قاعدة تقرير الاكتشاف §5.2: لا روابط غير مقيسة):
+
+| المصدر (اطلاع/قياس 2026-11-23) | ما يؤكده [مُقيس] |
+|---|---|
+| HF API + HEAD: `IFM/Jais-3-7B-GGUF` → `Jais-3-7B-Q4_K_M.gguf` | وسم ترخيص المستودع **apache-2.0** · الملف **5,592,226,016 بايت (5.59GB)** · مستودع أُنشئ 2026-10-13 (آخر تعديل 2026-11-22) — **قناة قياس Jais-3-7B على GHA (دفعة 14)** |
+| HF API + HEAD: `IFM/Jais-3-32B-GGUF` → `Jais-3-32B-Q4_K_M.gguf` | **apache-2.0** · **21,075,786,688 بايت (21.08GB)** — فئة Kaggle T4×2 بعد إثبات جدوى 7B |
+| HF API + HEAD: `unsloth/Qwen3.6-35B-A3B-GGUF` → `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf` | **apache-2.0** · **22,134,528,992 بايت (22.13GB)** — أولوية الفئة 20B+ على Kaggle |
+| HF API + HEAD: `unsloth/Qwen3.8-27B-GGUF` → `Qwen3.8-27B-UD-Q4_K_M.gguf` | **apache-2.0** · **16,564,259,744 بايت (16.56GB)** |
+| HF API + HEAD: `unsloth/gemma-4-26B-A4B-it-GGUF` → `gemma-4-26B-A4B-it-UD-Q4_K_M.gguf` | **apache-2.0** · **16,947,541,728 بايت (16.95GB)** — (بديل QAT رسمي موجود: `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` — لمقارنة التكميم لاحقًا) |
+| بحث HF API العام `?search=` عن كل عائلة أعلاه | التمييز بين المستودعات الرسمية/المجتمعية (استبعاد النسخ المعدلة: uncensored/abliterated/merged — ليست مرشحة) — الفرز وثق في تقرير الاكتشاف §4/§5 |
+
+**قياسات المشروع نفسه في هذه الدفعة:** إعادة تصحيح النتائج الخمس الموقعة بفحوص v2 محليًا (بلا توليد — `evaluation/results/m2/rescore/` + `scripts/test_m2_runner_checks.py` 21/21) — لا استهلاك أي مورد خارجي.
+
 </div>
