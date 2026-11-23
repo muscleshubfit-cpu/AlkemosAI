@@ -9,7 +9,12 @@
 #   - الفحوص: فشل التشغيل يخفق البناء (لا نتائج صامتة ناقصة).
 #   - (دفعة 14) فحوص v2 سارية تلقائيًا (سلامة ثنائية مصنفة · لغة الرد · تنقية harmony ·
 #     اكتمال · فواصل آلاف) + مجسات v1.1 ثنائية اللغة + تمرير n_ctx الذي كان معرفًا
-#     كمدخل وغير مستخدم (أُصلح هذه الدفعة).
+#     كمدخل وغير مستخدم (أُصلح تلك الدفعة).
+#   - (دفعة 15 — فشل تشغيل Jais رقم 45176791920) قانون عدم فقد المراحل:
+#     نتائج البطارية تُلزم وتُدفع فور نجاحها (قبل المجسات إطلاقًا) · خطوة المجسات
+#     continue-on-error مع كتابة تدريجية في العدّاء (فشل مجس لا يهدر المنجز) ·
+#     نتائج المجسات تُلزم if:always · الأدلة تُرفع if:always · بوابة ختامية
+#     تُبقي البناء أحمر إن أخفقت المجسات (الرؤية محفوظة والنتائج محفوظة).
 
 name: m2-battery-gguf
 on:
@@ -70,7 +75,26 @@ jobs:
             --out-dir evaluation/results/m2 \
             --tag "${{ inputs.model_alias }}"
 
-      - name: Run trainer probes (v1.1 — أنماط ثنائية اللغة — دفعة 14)
+      - name: Commit battery results immediately (قانون عدم فقد المراحل — دفعة 15)
+        run: |
+          git config user.name "alkemosai-m2-runner"
+          git config user.email "runner@alkemosai.local"
+          git add evaluation/results/m2/
+          if ! git diff --cached --quiet; then
+            git commit -m "eval(M2 آلي): نتائج بطارية ${{ inputs.model_alias }} — عينة طبقية 36 (حفظ فوري بعد نجاح البطارية — سير m2-battery-gguf، بلا أسرار)"
+          fi
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            for i in 1 2 3 4 5; do
+              git pull --rebase origin main && git push && break
+              echo "push conflict — retry $i"; sleep 20
+            done
+          else
+            echo "battery results already pushed (or nothing new)"
+          fi
+
+      - name: Run trainer probes (v1.1 — أنماط ثنائية اللغة — كتابة تدريجية)
+        id: probes
+        continue-on-error: true
         run: |
           python3 scripts/m2_run_battery.py \
             --channel gguf \
@@ -82,24 +106,37 @@ jobs:
             --out-dir evaluation/results/m2 \
             --tag "${{ inputs.model_alias }}"
 
-      - name: Commit signed results (evaluation/results/m2 only)
+      - name: Commit probe results (if:always — المنجز الجزئي يُحفظ أيضًا)
+        if: always()
         run: |
           git config user.name "alkemosai-m2-runner"
           git config user.email "runner@alkemosai.local"
           git add evaluation/results/m2/
-          if git diff --cached --quiet; then
-            echo "no new results to commit"
-          else
-            git commit -m "eval(M2 آلي): نتائج بطارية ومجسات ${{ inputs.model_alias }} — عينة طبقية 36 + مجسات المدرب (سير m2-battery-gguf، بلا أسرار)"
+          if ! git diff --cached --quiet; then
+            git commit -m "eval(M2 آلي): نتائج مجسات ${{ inputs.model_alias }} — مجسات المدرب v1.1 (سير m2-battery-gguf، بلا أسرار)"
+          fi
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
             for i in 1 2 3 4 5; do
               git pull --rebase origin main && git push && break
               echo "push conflict — retry $i"; sleep 20
             done
+          else
+            echo "probe results already pushed (or nothing new)"
           fi
 
-      - name: Upload artifacts
+      - name: Upload artifacts (if:always — الأدلة تُرفع مهما كان مآل المجسات)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: m2-results-${{ inputs.model_alias }}
           path: evaluation/results/m2/
           retention-days: 90
+
+      - name: Outcome gate (فشل المجسات يُبقي البناء أحمر — لا نتائج صامتة ناقصة)
+        if: always()
+        run: |
+          echo "probes_outcome=${{ steps.probes.outcome }}"
+          if [ "${{ steps.probes.outcome }}" = "failure" ]; then
+            echo "::error::فشلت المجسات — نتائج البطارية (والمجسات المنجزة) ملتزمة والأدلة مرفوعة؛ انظر السجل للسبب"
+            exit 1
+          fi

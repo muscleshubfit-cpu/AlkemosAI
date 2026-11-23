@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""اختبارات فحوص العدّاء v2 (دفعة 14 — إصلاحات الفحص الستة — المراجعة النوعية §7).
+"""اختبارات فحوص العدّاء v2/v2.1 (دفعات 14+15).
 
 T01..T09 اختبارات وحدات على الدوال النقية (فواصل الآلاف · تنقية harmony · لغة الرد).
 T10..T18 اختبارات انحدار على النتائج الموقعة الحقيقية الخمسة في evaluation/results/m2/
@@ -9,6 +9,10 @@ T10..T18 اختبارات انحدار على النتائج الموقعة ال
          النمط القديم كان يخفق فيها (منهج البرهان نفسه المستخدم في اختبارات G-K).
 T19..T20 اختبار تكامل بعدّاء زائف (بلا نموذج — بلا شبكة): الحقول الجديدة تُكتب
          في السجلات والملخصات، ومنطق إعادة المحاولة/الاكتمال يعمل.
+T21..T28 (دفعة 15 — فشل تشغيل Jais-3-7B رقم 45176791920): تنقية وسوم تفكير ifm
+         بأنماطها الأربعة · كاشف think_leak · حقن حقل التفكير لقالب Jais (إعادة إنتاج
+         الاستثناء الحقيقي وإصلاحه بعدّاء زائف) · كتابة المجسات التدريجية + الاستئناف
+         · حقول الأدلة (raw/finish_reason) — بلا نموذج وبلا شبكة.
 
 بلا أسرار (R-35) · لا يمس البطارية القانونية ولا المجسات v1 ولا النتائج الموقعة (قراءة-فقط).
 """
@@ -258,12 +262,184 @@ class FakeChannel:
         self.calls += 1
         task = messages[-1]["content"]
         if "بروتوكول فارغ" in task:
-            return "", 0, 0.1  # فارغ دائمًا → protocol_fail بعد إعادة المحاولة
+            return "", 0, 0.1, None  # فارغ دائمًا → protocol_fail بعد إعادة المحاولة
         if "قناة خام" in task:
             if task.endswith("/no_think"):
-                return "<|channel|>final<|message|>إجابة عربية نظيفة بعد إعادة المحاولة", 20, 0.2
-            return "<|channel|>analysis<|message|>تحليل خام بلا إجابة نهائية إطلاقًا", 30, 0.2
-        return "إجابة عربية سليمة تذكر الطبيب المختص والرقم 1828", 25, 0.1
+                return "<|channel|>final<|message|>إجابة عربية نظيفة بعد إعادة المحاولة", 20, 0.2, "stop"
+            return "<|channel|>analysis<|message|>تحليل خام بلا إجابة نهائية إطلاقًا", 30, 0.2, "stop"
+        return "إجابة عربية سليمة تذكر الطبيب المختص والرقم 1828", 25, 0.1, "stop"
+
+
+# ------------------------------------- T21..T28 (دفعة 15 — فشل تشغيل Jais رقم 45176791920)
+
+def t21_ifm_strip_native():
+    """النمط الأصلي لJais-3: القالب يفتح كتلة التفكير في البرومبت فيحمل الخام
+    التفكير (إنجليزي عادة) ثم وسم الإغلاق فقط — كل ما قبل الإغلاق الأول تفكير يُزال."""
+    raw = ("The user asks in Arabic for calories. Mifflin-St Jeor: 10*80 + 6.25*180 - 5*30 + 5 = 1780. "
+           "TDEE moderate 1.55 -> 2759. Deficit 500 -> 2259.</ifm|think>احتياجك حوالي 2259 سعرة يوميًا")
+    got = mrb.strip_think(raw)
+    check("T21: تنقية ifm — وسم الإغلاق اليتيم (نمط Jais الأصلي) يزيل التفكير ويبقي الإجابة العربية",
+          got == "احتياجك حوالي 2259 سعرة يوميًا", f"got={got!r}")
+    # البرهان: النمط القديم (دفعة 14) كان يبقي التفكير كله ملتحقًا بالإجابة
+    old = mrb.re.sub(r"<think>.*?</think>", "", raw, flags=mrb.re.S).strip()
+    check("T21-ب: النمط القديم كان يُبقي الخام ملوثًا (برهان الحاجة للإصلاح)",
+          "</ifm|think>" in old and "Mifflin" in old)
+
+
+def t22_ifm_strip_variants():
+    pair = mrb.strip_think("<ifm|think>\nreasoning\n</ifm|think>Answer 1234")
+    fast = mrb.strip_think("thinking...</ifm|think_faster>الجابة النهائية 1828")
+    unclosed = mrb.strip_think("final text<ifm|think>still thinking")
+    unclosed_start = mrb.strip_think("<ifm|think>all thinking no close")
+    check("T22: تنقية ifm — أزواج مغلقة + متغيرات fast/faster + كتلة مفتوحة حتى النهاية",
+          pair == "Answer 1234" and fast == "الجابة النهائية 1828"
+          and unclosed == "final text" and unclosed_start == "")
+
+
+def t23_ifm_no_regression_legacy():
+    """لا انحدار: النصوص بلا وسوم ifm تمر كما هي — والوسوم القديمة think قواعدها ذاتها."""
+    plain = mrb.strip_think("نص عربي سليم بلا وسوم إطلاقًا مع الرقم 1828")
+    legacy = mrb.strip_think("<think>old reasoning</think>clean answer")
+    check("T23: بلا انحدار — النص النظيف كما هو وthink القديمة بقواعد دفعة 14",
+          plain == "نص عربي سليم بلا وسوم إطلاقًا مع الرقم 1828" and legacy == "clean answer")
+
+
+def t24_think_leak_detector():
+    check("T24: كاشف think_leak — وسوم ifm وthink تُرصد في الخام والنص النظيف لا",
+          mrb.has_think_leak("T</ifm|think>A") is True
+          and mrb.has_think_leak("<think>x</think>a") is True
+          and mrb.has_think_leak("<ifm|think_fast>") is True
+          and mrb.has_think_leak("إجابة نظيفة تمامًا") is False
+          and mrb.has_think_leak("") is False)
+
+
+class FakeJaisLlama:
+    """محاكي Llama لقالب Jais-3: الرفض الحقيقي في المرة الأولى ثم القبول بعد الحقن
+    (نفس نص استثناء التشغيل الفاشل 45176791920 حرفيًا)."""
+    def __init__(self):
+        self.calls = []
+
+    def create_chat_completion(self, messages, max_tokens, temperature):
+        for m in messages:
+            if m.get("role") == "assistant" and not any(
+                    k in m for k in mrb.THINKING_FIELDS):
+                self.calls.append("rejected")
+                raise ValueError("Assistant message is missing a thinking field. "
+                                 "Provide one of: think, reasoning, reasoning_content, think_fast, think_faster.")
+        self.calls.append(messages)
+        return {"choices": [{"message": {"content": "تمر الترجمة والجواب عربي سليم"},
+                            "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 12}}
+
+
+def t25_template_thinking_injection():
+    """إعادة إنتاج استثناء قالب Jais على مجس متعدد الأدوار (M2P-04) + إصلاحه بالحقن."""
+    ch = mrb.GGUFChannel.__new__(mrb.GGUFChannel)  # بلا تحميل نموذج — محاكي فقط
+    ch.llm = FakeJaisLlama()
+    ch.max_tokens = 420
+    p = next(p for p in load_probes_file("1.1") if p["id"] == "M2P-04")
+    msgs = [{"role": "system", "content": mrb.SYSTEM_PROMPT}] + \
+           [{"role": t["role"], "content": t["content"]} for t in p["turns"]]
+    raw, ntok, dur, fr = ch.chat(msgs)
+    ok_retry = ch.llm.calls[0] == "rejected" and isinstance(ch.llm.calls[1], list)
+    ok_patched = any(m.get("role") == "assistant" and m.get("think") == "" for m in ch.llm.calls[1])
+    ok_clean = all("think" not in m for m in msgs)  # مدخلات المتصل لم تُعدل
+    check("T25: قالب Jais — الاستثناء الحقيقي يُلتقط ويُحقن think=\"\" ويُعاد بنجاح بلا تعديل المدخلات",
+          ok_retry and ok_patched and ok_clean and raw == "تمر الترجمة والجواب عربي سليم" and fr == "stop",
+          f"retry={ok_retry} patched={ok_patched} clean={ok_clean}")
+
+
+def t25b_template_injection_passthrough():
+    """لا انحدار: استثناء Value آخر لا يُبتلع — يُعاد رفعه كما هو."""
+    class OtherErrorLlama:
+        def create_chat_completion(self, messages, max_tokens, temperature):
+            raise ValueError("some unrelated template error")
+    ch = mrb.GGUFChannel.__new__(mrb.GGUFChannel)
+    ch.llm = OtherErrorLlama()
+    ch.max_tokens = 320
+    raised = False
+    try:
+        ch.chat([{"role": "user", "content": "x"}])
+    except ValueError as e:
+        raised = "unrelated" in str(e)
+    check("T25-ب: استثناء آخر يُعاد رفعه (لا ابتلاع عشوائي)", raised)
+
+
+class CrashThenWorkChannel(FakeChannel):
+    """قناة تفشل على مجس محدد ثم تنجح عند إعادة التشغيل — لمحاكاة انهيار منتصف المجسات."""
+    def __init__(self, crash_on):
+        super().__init__()
+        self.crash_on = crash_on
+        self.crashed = False
+
+    def chat(self, messages):
+        if self.crashed:  # بعد الانهيار الأول (إعادة تشغيل) تتصرف كقناة سليمة
+            return "إجابة عربية سليمة تذكر الرقم 1828", 10, 0.1, "stop"
+        task = messages[-1]["content"]
+        if self.crash_on in task:
+            self.crashed = True
+            raise RuntimeError("boom — simulated mid-probes crash")
+        return super().chat(messages)
+
+
+def t26_probes_incremental_and_resume():
+    """فشل مجس في المنتصف لا يهدر المنجز (كتابة تدريجية) — والاستئناف يكمل الباقي."""
+    probes = [p for p in load_probes_file("1.1") if p["id"] in ("M2P-01", "M2P-02", "M2P-04")]
+    ch = CrashThenWorkChannel(crash_on=probes[1]["turns"][-1]["content"][:30])
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "probes.jsonl")
+        crashed = False
+        try:
+            mrb.run_probes(ch, probes, out, "fake")
+        except RuntimeError:
+            crashed = True
+        partial = [json.loads(l) for l in open(out, encoding="utf-8")] if os.path.exists(out) else []
+        ok_partial = crashed and len(partial) == 1 and partial[0]["id"] == "M2P-01"  # المنجز محفوظ
+        res = mrb.run_probes(ch, probes, out, "fake", resume=True)
+        ok_resume = len(res) == 3 and {r["id"] for r in res} == {"M2P-01", "M2P-02", "M2P-04"} \
+            and sum(1 for _ in open(out, encoding="utf-8")) == 3
+        check("T26: كتابة المجسات التدريجية + الاستئناف — المنجز ينجو من انهيار لاحق",
+              ok_partial and ok_resume, f"partial={ok_partial} resume={ok_resume}")
+
+
+def t27_evidence_fields_battery():
+    """حقول الأدلة (raw/finish_reason/think_leak) تُسجل في سجلات البطارية والملخص."""
+    cases = [{"id": "TEST-J", "group": "ai-job", "lang": "ar", "critical": False,
+              "task": "سؤال تفكير إلزامي", "expected": "الرقم 1828"}]
+    # قناة ترد بنمط Jais الخام (تفكير إنجليزي + وسم إغلاق + إجابة عربية)
+    class JaisRawChannel:
+        label = "fake-jais"
+        def chat(self, messages):
+            return ("English thinking about 1828 calories and macros follows here.</ifm|think>"
+                    "الجابة المباشرة: احتياجك اليومي تقريبًا 1828 سعرة حرارية مع توازن مناسب للماكروز", 40, 0.3, "stop")
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "battery.jsonl")
+        res = mrb.run_battery(JaisRawChannel(), cases, out, "fake")
+        s = mrb.summarize(res, "fake", "test")
+        r = res[0]
+        ok_rec = (r["output"] == "الجابة المباشرة: احتياجك اليومي تقريبًا 1828 سعرة حرارية مع توازن مناسب للماكروز"
+                  and r["raw"].startswith("English thinking")
+                  and r["finish_reason"] == "stop" and r["think_leak"] is True
+                  and r["lang_match"] is True)
+        ok_sum = s["all"]["think_leak_n"] == 1 and s["all"]["truncated_n"] == 0 \
+            and s["all"]["lang_match"] == 1.0 and "think_leak_n" in s["ar"]
+        check("T27: حقول الأدلة — raw/finish_reason/think_leak في السجل وthink_leak_n/truncated_n في الملخص",
+              ok_rec and ok_sum, f"rec={ok_rec} sum={ok_sum}")
+
+
+def t28_lang_check_uncontaminated():
+    """الهدف الأصلي للإصلاح: بعد التنقية يجتاز فحص اللغة ما كان يفشل به ملوثًا
+    (نمط فشل التشغيل 45176791920: lang_match=0 لكل الحالات العربية)."""
+    raw = ("The user asks in Egyptian Arabic. Let me think about BMR and TDEE. "
+           "Weight 95kg height 178cm age 35. Activity moderate. Target deficit. "
+           "I should answer in Arabic with the numbers.</ifm|think>"
+           "احتياجك اليومي تقريبًا 2259 سعرة، والبروتين 160 غرام تقريبًا، اشرب ماء كفاية وامش يوميًا.")
+    contaminated = mrb.re.sub(r"<think>.*?</think>", "", raw, flags=mrb.re.S).strip()  # سلوك دفعة 14
+    cleaned = mrb.strip_think(raw)  # سلوك دفعة 15
+    check("T28: فحص اللغة — التنقية الجديدة تقلب الإخفاق إلى اجتياز على نفس الخام",
+          mrb.lang_check("ar-EG", contaminated) is False
+          and mrb.lang_check("ar-EG", cleaned) is True
+          and mrb.lang_check("ar-EG", raw) is False)
 
 
 def t19_integration_battery():
@@ -312,7 +488,11 @@ def main():
               t09_lang_check, t10_classifier, t11_087_bilingual, t12_104_classified,
               t13_gptoss_083_protocol_fail, t14_gptoss_104_final_extracted, t15_glm_water,
               t16_sleep_flag_bilingual, t17_probes_v11_integrity, t18_ornith_lang_leak,
-              t19_integration_battery, t20_integration_probes):
+              t19_integration_battery, t20_integration_probes,
+              t21_ifm_strip_native, t22_ifm_strip_variants, t23_ifm_no_regression_legacy,
+              t24_think_leak_detector, t25_template_thinking_injection,
+              t25b_template_injection_passthrough, t26_probes_incremental_and_resume,
+              t27_evidence_fields_battery, t28_lang_check_uncontaminated):
         t()
     print(f"\n=== {len(PASS)} PASS / {len(FAIL)} FAIL ===")
     if FAIL:

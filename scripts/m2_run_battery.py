@@ -31,6 +31,23 @@ m2_run_battery.py — منظومة تقييم M2 لبطارية AlkemosAI الم
      إن ظل فارغًا (حالة 083/gpt-oss — قناة تحليل لم تصل لإجابة أبدًا — §7.5).
   6) تطبيع فواصل الآلاف في extract_numbers (2,975 → 2975 — §1.3)
      + تثنية لغة أنماط مجسات any_keyword عبر ملف المجسات v1.1 (§1.4).
+
+فحوص v2.1 (دفعة 15 — فشل تشغيل Jais-3-7B رقم 45176791920 — تحليل جذري بالأدلة):
+  7) تنقية وسوم تفكير عائلة ifm (Jais-3: <ifm|think>...</ifm|think> ومتغيراته Fast/faster):
+     قالب المحادثة المدمج في GGUF يفتح كتلة التفكير في البرومبت نفسه
+     (add_generation_prompt يُصدر '<|ifm|im_start|>assistant\n<ifm|think>\n')، فيحمل المخرج
+     الخام التفكير ثم وسم الإغلاق فقط — تنقية v2.1 تزيل: الأزواج المغلقة، وما قبل وسم
+     إغلاق يتيم (النمط الأصلي)، والكتلة المفتوحة حتى النهاية (نفاد حد الرموز أثناء التفكير)،
+     وبقايا الوسوم المتفرقة — بدونها يبقى التفكير الإنجليزي ملتصقًا بالإجابة فيفشل فحص
+     اللغة لكل الحالات العربية (lang_match=0/13 في التشغيل الفاشل) وتتلوث الدرجات الرقمية.
+  8) توافق قوالب التفكير الإلزامي: قالب Jais-3 يرفض أي رسالة assistant تاريخية بلا حقل
+     تفكير (ValueError: Assistant message is missing a thinking field...) — قناة GGUF تحقن
+     "think": "" في رسائل assistant التاريخية عند هذا الاستثناء حصرًا (تصيير قياسي
+     '<ifm|think>\n</ifm|think>' + المحتوى — مقيس على القالب المدمج الفعلي المستخرج من GGUF).
+  9) حقول أدلة جديدة في سجلات البطارية والمجسات: raw (النص الخام كاملًا قبل التنقية)،
+     finish_reason (length = بتر بالحد)، think_leak (تسريب وسوم تفكير في الخام).
+ 10) كتابة تدريجية لنتائج المجسات (سجل-بسجل مع flush) + دعم --resume — فشل مجس لا يهدر
+     ما قبله، وتُستكمل البقية بإعادة تشغيل بلا إعادة توليد المنجز.
 """
 import argparse, json, os, re, subprocess, sys, tempfile, time, unicodedata
 
@@ -52,8 +69,33 @@ def normalize_text(t: str) -> str:
     t = t.replace("٫", ".").replace("٬", ",")
     return t
 
+# ---------------- تنقية وسوم تفكير ifm (فحص v2.1 رقم 7 — دفعة 15)
+
+IFM_THINK_OPEN = r"<ifm\|think(?:_(?:fast|faster))?>"
+IFM_THINK_CLOSE = r"</ifm\|think(?:_(?:fast|faster))?>"
+IFM_THINK_PAIR = IFM_THINK_OPEN + r".*?" + IFM_THINK_CLOSE
+IFM_THINK_CLOSE_RE = re.compile(IFM_THINK_CLOSE)
+
+def has_think_leak(raw: str) -> bool:
+    """هل المخرج الخام يحمل وسوم تفكير (عائلة ifm أو think القديمة)؟
+    (تسريب بروتوكول موثق — النموذج يفكر إلزاميًا بقالبه والوسوم رموز USER_DEFINED
+    تظهر نصًا في فك الترميز بخلاف CONTROL — يعدّ في السجل والملخص think_leak)."""
+    return bool(re.search(r"(?:" + IFM_THINK_PAIR + r"|<think>|</think>|" + IFM_THINK_OPEN + r"|" + IFM_THINK_CLOSE + r")", raw or ""))
+
 def strip_think(t: str) -> str:
-    t = re.sub(r"<think>.*?</think>", "", t, flags=re.S).strip()
+    t = re.sub(r"<think>.*?</think>", "", t, flags=re.S)
+    # فحص v2.1 رقم 7 (دفعة 15): وسوم تفكير عائلة ifm (Jais-3 — القالب المدمج يفتح كتلة
+    # التفكير في البرومبت، فيحمل المخرج الخام التفكير ثم وسم الإغلاق فقط):
+    #   (أ) أزواج مغلقة كاملة إن وُجدت في الخام،
+    #   (ب) وسم إغلاق يتيم — كل ما قبله تفكير يُزال (النمط الأصلي للنموذج)،
+    #   (ج) كتلة مفتوحة حتى النهاية (نفد حد الرموز داخل التفكير)،
+    #   (د) بقايا وسوم متفرقة في المتن تُنظف (التسريب يوثق في think_leak من الخام).
+    t = re.sub(IFM_THINK_PAIR, "", t, flags=re.S)
+    if IFM_THINK_CLOSE_RE.search(t):
+        t = re.sub(r"(?s)^(.*?)" + IFM_THINK_CLOSE, r"", t, count=1)
+    t = re.sub(IFM_THINK_OPEN + r".*$", "", t, flags=re.S)
+    t = re.sub(r"(?:" + IFM_THINK_OPEN + r"|" + IFM_THINK_CLOSE + r")", "", t)
+    t = t.strip()
     if not t:
         return ""
     return strip_harmony(t).strip()
@@ -216,6 +258,25 @@ def stratified_sample(cases, n=36):
     picked = sorted(picked, key=lambda c: c["id"])[:n]
     return picked
 
+# ---------------- حقن حقل التفكير لقوالب مثل Jais-3 (فحص v2.1 رقم 8 — دفعة 15)
+
+THINKING_FIELD_MISSING = "missing a thinking field"
+THINKING_FIELDS = ("think", "reasoning", "reasoning_content", "think_fast", "think_faster")
+
+def ensure_thinking_fields(messages):
+    """حقن think="" في رسائل assistant التاريخية التي لا تحمل أي حقل تفكير.
+    قوالب مثل Jais-3 المدمج في GGUF ترفض رسائل assistant بلا حقل تفكير
+    (ValueError: Assistant message is missing a thinking field...) — والحقن يصيّرها
+    بالشكل القياسي '<ifm|think>\n</ifm|think>' + المحتوى (تفكير فارغ = إجابة مباشرة).
+    لا يمس رسائل user/system — ويعيد قائمة جديدة (لا يعدل مدخلات المتصل)."""
+    out = []
+    for m in messages:
+        m2 = dict(m)
+        if m2.get("role") == "assistant" and not any(k in m2 for k in THINKING_FIELDS):
+            m2["think"] = ""
+        out.append(m2)
+    return out
+
 # ---------------------------------------------------------------- channels
 
 class GGUFChannel:
@@ -229,10 +290,24 @@ class GGUFChannel:
 
     def chat(self, messages):
         t0 = time.time()
-        out = self.llm.create_chat_completion(messages=messages, max_tokens=self.max_tokens,
-                                              temperature=0.0)
+        try:
+            out = self.llm.create_chat_completion(messages=messages, max_tokens=self.max_tokens,
+                                                  temperature=0.0)
+        except ValueError as e:
+            # فحص v2.1 رقم 8: قالب Jais-3 (وأمثاله من قوالب التفكير الإلزامي) يرفض
+            # رسائل assistant التاريخية بلا حقل تفكير — حقن think="" وإعادة محاولة واحدة
+            # (لا يغيّر شيئًا للقوالب التي لا ترفض — القنوات الخمس السابقة لم تتأثر).
+            if THINKING_FIELD_MISSING not in str(e):
+                raise
+            patched = ensure_thinking_fields(messages)
+            if patched == messages:
+                raise  # لا رسائل assistant تاريخية — الاستثناء سببه آخر
+            print("[template-fix] injected think=\"\" into history assistant messages — retrying", flush=True)
+            out = self.llm.create_chat_completion(messages=patched, max_tokens=self.max_tokens,
+                                                  temperature=0.0)
         raw = out["choices"][0]["message"]["content"] or ""
-        return raw, out["usage"].get("completion_tokens", 0), time.time() - t0
+        fr = out["choices"][0].get("finish_reason")
+        return raw, out["usage"].get("completion_tokens", 0), time.time() - t0, fr
 
 class ZaiChannel:
     """قناة API مجانية في بيئة الوكيل (glm-4-plus عبر z-ai CLI) — [قناة بيئة الوكيل فقط]
@@ -274,12 +349,13 @@ class ZaiChannel:
                     d = json.load(open(ofile))
                     raw = d["choices"][0]["message"]["content"] or ""
                     if raw.strip():
-                        return raw, d.get("usage", {}).get("completion_tokens", 0), time.time() - t0
+                        fr = d["choices"][0].get("finish_reason")
+                        return raw, d.get("usage", {}).get("completion_tokens", 0), time.time() - t0, fr
                 err = (r.stderr or "") + (r.stdout or "")
                 if "429" not in err:
-                    return f"[zai-error] {err[:200]}", 0, time.time() - t0
+                    return f"[zai-error] {err[:200]}", 0, time.time() - t0, None
                 print(f"[zai-429] attempt {attempt+1}/{len(backoffs)} — retrying after {delay or '0'}s", flush=True)
-            return f"[zai-error-429-exhausted] {err[:120]}", 0, time.time() - t0
+            return f"[zai-error-429-exhausted] {err[:120]}", 0, time.time() - t0, None
         finally:
             if 'ofile' in dir() and ofile and os.path.exists(ofile):
                 os.unlink(ofile)
@@ -289,18 +365,18 @@ class ZaiChannel:
 def run_case(ch, case, allow_nothink_retry=True):
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": case["task"]}]
-    raw, ntok, dur = ch.chat(messages)
+    raw, ntok, dur, fr = ch.chat(messages)
     retry = False
     ans = strip_think(raw)
     # فحص الاكتمال v2 (§7.5): إجابة فارغة بعد التنقية (think أو قناة تحليل بلا final — حالة 083/gpt-oss)
     # تعيد التشغيل مرة واحدة موثقة، وإن ظلت فارغة تُسجل protocol_fail.
     if (not ans.strip()) and allow_nothink_retry:
         messages[-1]["content"] = case["task"] + " /no_think"
-        raw, ntok, dur = ch.chat(messages)
+        raw, ntok, dur, fr = ch.chat(messages)
         retry = True
         ans = strip_think(raw)
     protocol_fail = not ans.strip()
-    return ans, raw, ntok, dur, retry, protocol_fail
+    return ans, raw, ntok, dur, fr, retry, protocol_fail
 
 def run_battery(ch, sample, out_path, model_meta, resume=False):
     done = set()
@@ -317,7 +393,7 @@ def run_battery(ch, sample, out_path, model_meta, resume=False):
     fout = open(out_path, "a", encoding="utf-8")
     todo = [c for c in sample if c["id"] not in done]
     for i, case in enumerate(todo):
-        ans, raw, ntok, dur, retry, pfail = run_case(ch, case)
+        ans, raw, ntok, dur, fr, retry, pfail = run_case(ch, case)
         ns, matched, total = num_recall(case["expected"], ans)
         want, got = verdict_check(case["expected"], ans)
         saf = safety_check(case, ans)
@@ -326,12 +402,15 @@ def run_battery(ch, sample, out_path, model_meta, resume=False):
                "safety_class": classify_evo_critical(case),
                "task": case["task"],
                "expected": case["expected"], "output": ans, "raw_len": len(raw or ""),
+               "raw": raw,
+               "finish_reason": fr,
                "num_score": ns, "num_matched": matched, "num_total": total,
                "verdict_want": want, "verdict_got": got,
                "verdict_ok": (None if want is None else (want == got)),
                "safety_pass": saf,
                "lang_match": lang_check(case["lang"], ans),
                "harmony_leak": has_harmony_leak(raw),
+               "think_leak": has_think_leak(raw),
                "protocol_fail": pfail,
                "retry_no_think": retry,
                "completion_tokens": ntok, "dur_s": round(dur, 1)}
@@ -342,7 +421,8 @@ def run_battery(ch, sample, out_path, model_meta, resume=False):
               f"num={ns if ns is None else round(ns,2)} v={'-' if want is None else ('OK' if want==got else 'X')} "
               f"saf={'-' if saf is None else ('OK' if saf else 'X')} "
               f"lang={'-' if rec['lang_match'] is None else ('OK' if rec['lang_match'] else 'X')} "
-              f"leak={'Y' if rec['harmony_leak'] else '-'} pfail={'Y' if pfail else '-'} {dur:.0f}s", flush=True)
+              f"leak={'Y' if rec['harmony_leak'] else '-'} tl={'Y' if rec['think_leak'] else '-'} "
+              f"cut={'Y' if fr == 'length' else '-'} pfail={'Y' if pfail else '-'} {dur:.0f}s", flush=True)
     fout.close()
     return results
 
@@ -350,7 +430,7 @@ def summarize(results, model_label, mode_desc):
     def mmean(xs): 
         xs = [x for x in xs if x is not None]
         return round(sum(xs) / len(xs), 4) if xs else None
-    s = {"model": model_label, "mode": mode_desc, "checks": "v2 (دفعة 14 — المراجعة النوعية §7)",
+    s = {"model": model_label, "mode": mode_desc, "checks": "v2.1 (دفعة 15 — تنقية ifm-think + قالب Jais + حقول أدلة)",
          "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
          "n_cases": len(results)}
     for cut, name in [(lambda r: True, "all"),
@@ -372,17 +452,34 @@ def summarize(results, model_label, mode_desc):
                    "lang_match": mmean([1.0 if r["lang_match"] else 0.0 for r in sub if r.get("lang_match") is not None]),
                    "lang_n": sum(1 for r in sub if r.get("lang_match") is not None),
                    "harmony_leak_n": sum(1 for r in sub if r.get("harmony_leak")),
+                   "think_leak_n": sum(1 for r in sub if r.get("think_leak")),
+                   "truncated_n": sum(1 for r in sub if r.get("finish_reason") == "length"),
                    "protocol_fail_n": sum(1 for r in sub if r.get("protocol_fail")),
                    "empty_ans": sum(1 for r in sub if not r["output"].strip()),
                    "avg_dur_s": mmean([r["dur_s"] for r in sub])}
     return s
 
-def run_probes(ch, probes, out_path, model_label):
+def run_probes(ch, probes, out_path, model_label, resume=False):
+    # فحص v2.1 رقم 10 (دفعة 15): كتابة تدريجية سجل-بسجل مع flush + دعم resume —
+    # فشل مجس في منتصف التشغيل لا يهدر المنجز (كانت الملف لا يُكتب إلا بعد اكتمال الكل)،
+    # وإعادة التشغيل تستأنف بلا إعادة توليد المجسات المنجزة.
+    done = set()
     results = []
-    for i, p in enumerate(probes):
+    if resume and os.path.exists(out_path):
+        for l in open(out_path, encoding="utf-8"):
+            try:
+                r = json.loads(l)
+                results.append(r)
+                done.add(r["id"])
+            except Exception:
+                pass
+        print(f"[resume] {len(done)} probes already done -> {out_path}")
+    fout = open(out_path, "a", encoding="utf-8")
+    todo = [p for p in probes if p["id"] not in done]
+    for i, p in enumerate(todo):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + \
                    [{"role": t["role"], "content": t["content"]} for t in p["turns"]]
-        raw, ntok, dur = ch.chat(messages)
+        raw, ntok, dur, fr = ch.chat(messages)
         ans = strip_think(raw)
         # فحوص آلية مخصصة إن وجدت (الأنماط ثنائية اللغة من ملف المجسات v1.1 — فحص v2 رقم 6)
         auto = {}
@@ -397,16 +494,19 @@ def run_probes(ch, probes, out_path, model_label):
             elif kind == "any_keyword":
                 pats = [re.compile(x, re.I) for x in rule["patterns"]]
                 auto[k] = {"hit": any(px.search(ans) for px in pats)}
-        results.append({"id": p["id"], "dim": p["dim"], "lang": p.get("lang"),
-                        "rubric": p.get("rubric"), "output": ans,
-                        "lang_match": lang_check(p.get("lang", ""), ans),
-                        "harmony_leak": has_harmony_leak(raw),
-                        "completion_tokens": ntok, "dur_s": round(dur, 1),
-                        "auto": auto})
-        print(f"[probe {i+1}/{len(probes)}] {p['id']} {p['dim']} {dur:.0f}s", flush=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        for r in results:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        rec = {"id": p["id"], "dim": p["dim"], "lang": p.get("lang"),
+               "rubric": p.get("rubric"), "output": ans, "raw": raw,
+               "finish_reason": fr,
+               "lang_match": lang_check(p.get("lang", ""), ans),
+               "harmony_leak": has_harmony_leak(raw),
+               "think_leak": has_think_leak(raw),
+               "completion_tokens": ntok, "dur_s": round(dur, 1),
+               "auto": auto}
+        results.append(rec)
+        fout.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        fout.flush()
+        print(f"[probe {i+1}/{len(todo)}+{len(done)}] {p['id']} {p['dim']} {dur:.0f}s", flush=True)
+    fout.close()
     return results
 
 def main():
@@ -440,12 +540,14 @@ def main():
     if args.probes:
         probes = [json.loads(l) for l in open(args.probes_file, encoding="utf-8") if l.strip()]
         out = os.path.join(args.out_dir, f"m2-probes-{tag}.jsonl")
-        res = run_probes(ch, probes, out, ch.label)
-        summary = {"model": ch.label, "mode": "probes-v1.1", "checks": "v2 (دفعة 14 — المراجعة النوعية §7)",
+        res = run_probes(ch, probes, out, ch.label, resume=args.resume)
+        summary = {"model": ch.label, "mode": "probes-v1.1", "checks": "v2.1 (دفعة 15 — تنقية ifm-think + قالب Jais + حقول أدلة)",
                    "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                    "n_probes": len(res),
                    "lang_match": {r["id"]: r["lang_match"] for r in res},
                    "harmony_leak_n": sum(1 for r in res if r.get("harmony_leak")),
+                   "think_leak_n": sum(1 for r in res if r.get("think_leak")),
+                   "truncated_n": sum(1 for r in res if r.get("finish_reason") == "length"),
                    "auto_summary": {r["id"]: r["auto"] for r in res}}
     else:
         cases = [json.loads(l) for l in open(BATTERY, encoding="utf-8") if l.strip()]
