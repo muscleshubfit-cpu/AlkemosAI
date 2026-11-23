@@ -30,6 +30,14 @@ on:
         description: "سياق (افتراضي 4096)"
         required: false
         default: "4096"
+      battery_max_tokens:
+        description: "حد رموز البطارية (افتراضي 320 — للنماذج ذات التفكير الإلزامي الطويل: 1024 موثقًا كانحراف بروتوكول)"
+        required: false
+        default: "320"
+      probes_max_tokens:
+        description: "حد رموز المجسات (افتراضي 420 — للنماذج ذات التفكير الإلزامي الطويل: 1280 موثقًا كانحراف بروتوكول)"
+        required: false
+        default: "420"
 
 permissions:
   contents: write
@@ -70,7 +78,7 @@ jobs:
             --channel gguf \
             --model /tmp/m2models/model.gguf \
             --sample-n 36 \
-            --max-tokens 320 \
+            --max-tokens "${{ inputs.battery_max_tokens }}" \
             --n-ctx "${{ inputs.n_ctx }}" \
             --out-dir evaluation/results/m2 \
             --tag "${{ inputs.model_alias }}"
@@ -101,7 +109,7 @@ jobs:
             --model /tmp/m2models/model.gguf \
             --probes \
             --probes-file evaluation/m2/m2-trainer-probes-v1.1.jsonl \
-            --max-tokens 420 \
+            --max-tokens "${{ inputs.probes_max_tokens }}" \
             --n-ctx "${{ inputs.n_ctx }}" \
             --out-dir evaluation/results/m2 \
             --tag "${{ inputs.model_alias }}"

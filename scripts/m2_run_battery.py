@@ -390,7 +390,9 @@ def run_battery(ch, sample, out_path, model_meta, resume=False):
             except Exception:
                 pass
         print(f"[resume] {len(done)} cases already done -> {out_path}")
-    fout = open(out_path, "a", encoding="utf-8")
+    # (دفعة 15 — تتمة): بلا --resume يبدأ الملف من جديد (w) لا إلحاقًا — إعادة تشغيل السير على
+    # checkout يحوي نتائج ملتزمة سابقًا كانت ستُضاعف السجلات؛ الاستئناف صريح ب--resume حصرًا.
+    fout = open(out_path, "a" if resume else "w", encoding="utf-8")
     todo = [c for c in sample if c["id"] not in done]
     for i, case in enumerate(todo):
         ans, raw, ntok, dur, fr, retry, pfail = run_case(ch, case)
@@ -474,7 +476,7 @@ def run_probes(ch, probes, out_path, model_label, resume=False):
             except Exception:
                 pass
         print(f"[resume] {len(done)} probes already done -> {out_path}")
-    fout = open(out_path, "a", encoding="utf-8")
+    fout = open(out_path, "a" if resume else "w", encoding="utf-8")
     todo = [p for p in probes if p["id"] not in done]
     for i, p in enumerate(todo):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + \
@@ -543,7 +545,7 @@ def main():
         res = run_probes(ch, probes, out, ch.label, resume=args.resume)
         summary = {"model": ch.label, "mode": "probes-v1.1", "checks": "v2.1 (دفعة 15 — تنقية ifm-think + قالب Jais + حقول أدلة)",
                    "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                   "n_probes": len(res),
+                   "n_probes": len(res), "max_tokens": args.max_tokens,
                    "lang_match": {r["id"]: r["lang_match"] for r in res},
                    "harmony_leak_n": sum(1 for r in res if r.get("harmony_leak")),
                    "think_leak_n": sum(1 for r in res if r.get("think_leak")),
@@ -555,6 +557,7 @@ def main():
         out = os.path.join(args.out_dir, f"m2-battery-{mode}-{tag}.jsonl")
         res = run_battery(ch, sample, out, ch.label, resume=args.resume)
         summary = summarize(res, ch.label, mode)
+        summary["max_tokens"] = args.max_tokens  # توثيق حد الرموز في الملخص (بروتوكول — دفعة 15)
 
     sum_out = out.replace(".jsonl", "-summary.json")
     with open(sum_out, "w", encoding="utf-8") as f:

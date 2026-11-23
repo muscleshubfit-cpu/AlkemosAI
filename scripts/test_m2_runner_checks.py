@@ -398,8 +398,13 @@ def t26_probes_incremental_and_resume():
         res = mrb.run_probes(ch, probes, out, "fake", resume=True)
         ok_resume = len(res) == 3 and {r["id"] for r in res} == {"M2P-01", "M2P-02", "M2P-04"} \
             and sum(1 for _ in open(out, encoding="utf-8")) == 3
-        check("T26: كتابة المجسات التدريجية + الاستئناف — المنجز ينجو من انهيار لاحق",
-              ok_partial and ok_resume, f"partial={ok_partial} resume={ok_resume}")
+        # (دفعة 15 — تتمة): بلا --resume يبدأ الملف من جديد — إعادة تشغيل على ملف سابق
+        # كانت ستُلحق وتضاعف السجلات (خلل إعادة التشغيل على checkout يحوي نتائج ملتزمة)
+        mrb.run_probes(FakeChannel(), probes, out, "fake")  # بلا resume
+        fresh_count = sum(1 for _ in open(out, encoding="utf-8"))
+        check("T26: كتابة المجسات التدريجية + الاستئناف + بلا إلحاق تلقائي عند إعادة التشغيل",
+              ok_partial and ok_resume and fresh_count == 3,
+              f"partial={ok_partial} resume={ok_resume} fresh={fresh_count}")
 
 
 def t27_evidence_fields_battery():
