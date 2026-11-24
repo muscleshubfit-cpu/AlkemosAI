@@ -92,16 +92,23 @@ def main():
         approved_dir = os.path.join(tmp, "approved")
         archive_dir = os.path.join(tmp, "archive")
         ledger_root = os.path.join(tmp, "consent")  # خارج شجرة git (المستوى أ)
+        ta = auth.TokenAuthority(secrets.token_bytes(32), secrets.token_bytes(32))
+        # هويات موثقة للسجل: خدمة جلسة العميل تسجل opt-in العميل، والمالك
+        # يسجل أساسه بتوقيع مفتاحه المستقل، والعميل نفسه يسحب موافقته.
+        service_p = ta.verify(ta.mint(auth.KIND_SERVICE, "session-77", clients={"client-77"}))
+        owner_p = ta.verify(ta.mint(auth.KIND_OWNER, "owner-1"))
+        client_p = ta.verify(ta.mint(auth.KIND_CLIENT, "client-77"))
         ledger = consent.ConsentLedger(ledger_root)
         ledger.grant_client_consent(
             reference=CONSENT_REF, client_id="client-77", purpose="training",
             usage_scope=["training_only", "training_retrieval"], granted_at="2026-11-20",
+            principal=service_p,
         )
         ledger.record_owner_basis(
             reference=OWNER_BASIS_REF, purpose="training",
             usage_scope=["training_only"], decided_at="2026-11-21", decision_ref="قرار مالك-أساس-002",
+            principal=owner_p,
         )
-        ta = auth.TokenAuthority(secrets.token_bytes(32), secrets.token_bytes(32))
         verifier = ta.owner_verifier()
         gw = gateway.ExampleGateway(
             approved_dir, archive_dir,
@@ -185,7 +192,7 @@ def main():
         affected = gw.check_withdrawal(CONSENT_REF)
         check("الانسحاب: أمثلة الأساس المسحوب تُدرج للاستبعاد", set(affected) == {"EX-0001", "EX-0002"})
         check("الانسحاب: أساس بلا أمثلة = قائمة فارغة", gw.check_withdrawal("basis-nonexistent") == [])
-        ledger.withdraw(CONSENT_REF, "2026-11-24", "طلب العميل الانسحاب")
+        ledger.withdraw(CONSENT_REF, "2026-11-24", principal=client_p, reason="طلب العميل الانسحاب")
         post = _candidate(tmp, src_name="source-post-withdraw.json", basis={"kind": "client_consent", "reference": CONSENT_REF, "withdrawn": False})
         check("الانسحاب: مرشح يدّعي النشاط والسجل مسحوب → يُرفض", not gw.submit(post)["passed"] and any("مسحوب" in e for e in gw.submit(post)["errors"]))
         check("الانسحاب: محاولة اعتماد على الأساس المسحوب ترفض", _raises(lambda: gw.approve(post, _owner_signature(ta, post)), gateway.GatewayError))

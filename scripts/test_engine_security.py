@@ -7,9 +7,16 @@
 والحوكمة»)
 
 كل فحص هنا محاولة اختراق معلنة: الهجوم يُنفذ فعليًا والنجاح المطلوب هو
-**فشل الاختراق**. تغطية:
-- الهوية: توكن مزور/معدل/منتهي/متصعد + دور نصي من المستدعي.
+**فشل الاختراق**، ومعه فحوص ضابطة موجبة تثبت أن المسار المشروع يعمل.
+التغطية:
+- الهوية: توكن مزور/معدل/منتهي/متصعد + دور نصي من المستدعي + **إنشاء
+  Principal مباشرة ببيانات المستدعي (هوية مالك أو صلاحيات موسعة) + الوراثة
+  + التعديل بعد الإنشاء + الكائنات المزيفة (__new__ وبط البط — duck typing)
+  + رموز owner موقع بمفتاح المنصة (المالك بمفتاحه المستقل حصرًا)**.
 - عزل العملاء: خدمة/عميل/أدمن خارج النطاق — معرفة client_id لا تكفي.
+- سجل الموافقات: **تسجيل المنح/الأساس/الانسحاب بهوية موثقة وصلاحية محددة —
+  بلا هوية أو بنص granted_by="owner" أو بخارج النطاق أو بغير المالك لأساس
+  المالك: كله مرفوض**، مع فحوص موجبة للمسارات المشروعة.
 - G-EX: توقيع نصي «owner» + مفتاح غير المالك + إعادة استخدام توقيع +
   مرجع موافقة وهمي + أساس مسحوب + بلا سجل (fail-closed).
 - سجل الاعتماد: عبث بملف معتمد أو بالسلسلة يُكشف.
@@ -19,6 +26,7 @@
 كل المفاتيح هنا مولدة عشوائية في الذاكرة — لا أسرار في المستودع.
 """
 import hashlib
+import hmac
 import json
 import multiprocessing as mp
 import os
@@ -42,6 +50,18 @@ def _raises(fn, exc):
         fn()
         return False
     except exc:
+        return True
+    except Exception:
+        return False
+
+
+def _raises_any(fn, excs):
+    """مثل _raises لكن يقبل مجموعة استثناءات مقبولة (مثل TypeError+ConsentLedgerError
+    عند استدعاءات بالشكل القديم الملغى — الرفض الحاد مقبول بأي شكل)."""
+    try:
+        fn()
+        return False
+    except excs:
         return True
     except Exception:
         return False
@@ -103,11 +123,78 @@ def main():
         json.dumps(p2, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).rstrip(b"=").decode("ascii")
     esc_sig = base64.urlsafe_b64encode(
-        __import__("hmac").new(ta._auth_key, esc_body.encode("utf-8"), hashlib.sha256).digest()
+        hmac.new(ta._auth_key, esc_body.encode("utf-8"), hashlib.sha256).digest()
     ).rstrip(b"=").decode("ascii")
     check(
         "الهوية: توكن أدمن موقع سليمًا لكنه يدّعي صلاحيات المالك → التحقق يرفضه (سقف النوع)",
         _raises(lambda: ta.verify(esc_body + "." + esc_sig), auth.AuthError),
+    )
+
+    # ══ 1-ب) تزييف الهوية بنيويًا: الإنشاء محصور بمسار تحقق التوقيع ═════
+    check(
+        "الهوية: إنشاء Principal مباشرة ببيانات المستدعي (هوية مالك كاملة) مرفوض",
+        _raises(
+            lambda: auth.Principal("مزور", auth.KIND_OWNER, frozenset(), True,
+                                  frozenset(auth._KIND_MAX_PERMS[auth.KIND_OWNER]), 9999999999),
+            auth.AuthError,
+        ),
+    )
+    check(
+        "الهوية: إنشاء هوية خدمة بصلاحيات موسعة مباشرةً (بلا رمز) مرفوض",
+        _raises(
+            lambda: auth.Principal("مزور", auth.KIND_SERVICE, frozenset({"c1"}), False,
+                                  frozenset({auth.PERM_MEMORY_HARD_DELETE}), 9999999999),
+            auth.AuthError,
+        ),
+    )
+    check(
+        "الهوية: وراثة Principal لتجاوز حارس الإنشاء مرفوضة",
+        _raises(lambda: type("FakePrincipal", (auth.Principal,), {}), auth.AuthError),
+    )
+    ok_p = ta.verify(ta.mint(auth.KIND_SERVICE, "session-ok", clients={"c1"}))
+    check(
+        "الهوية: تعديل صفات الهوية بعد الإنشاء (ترقية إلى مالك) مرفوض",
+        _raises(lambda: setattr(ok_p, "kind", auth.KIND_OWNER), auth.AuthError),
+    )
+
+    def _resign(body_b64, key):
+        raw = base64.urlsafe_b64decode(body_b64 + "=" * (-len(body_b64) % 4))
+        sig = hmac.new(key, raw, hashlib.sha256).digest()
+        return body_b64 + "." + base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
+
+    owner_body, _ = ta.mint(auth.KIND_OWNER, "owner-real").split(".")
+    check(
+        "الهوية: توكن نوع owner موقع بمفتاح المنصة مرفوض (المالك بمفتاحه المستقل حصرًا)",
+        _raises(lambda: ta.verify(_resign(owner_body, ta._auth_key)), auth.AuthError),
+    )
+    svc_body, _ = ta.mint(auth.KIND_SERVICE, "session-s", clients={"c1"}).split(".")
+    check(
+        "الهوية: توكن نوع خدمة موقع بمفتاح المالك مرفوض (المفتاحان لا يتبادلان الأدوار)",
+        _raises(lambda: ta.verify(_resign(svc_body, ta._owner_key)), auth.AuthError),
+    )
+
+    class _DuckFakeIdentity:
+        """كائن مزيف بواجهة مشابهة — النوع الموثق حصرًا، الواجهة لا تكفي."""
+        def can(self, _permission):
+            return True
+        def can_access_client(self, _client_id):
+            return True
+        def describe(self):
+            return "owner:مزيف"
+
+    mem0 = store.InMemoryMemoryStore()
+    check(
+        "الهوية: MemoryService ترفض كائنًا مزيفًا بواجهة مشابهة (duck typing لا يعبر)",
+        _raises(lambda: service.MemoryService(mem0, _DuckFakeIdentity()), service.MemoryServiceError),
+    )
+    forged_new = auth.Principal.__new__(auth.Principal)  # إنشاء بلا مسار التحقق
+    check(
+        "الهوية: MemoryService ترفض هوية أُنشئت بـ__new__ بلا تحقق (رفض نظيف لا انفجار)",
+        _raises(lambda: service.MemoryService(mem0, forged_new), service.MemoryServiceError),
+    )
+    check(
+        "الهوية: مفتاح الإنشاء ليس خاصية وحدة (لا يمكن استيراده من الخارج)",
+        not hasattr(auth, "_creation_key") and not hasattr(auth, "_PRINCIPAL_CREATION_KEY"),
     )
 
     # ══ 2) عزل العملاء ════════════════════════════════════════════════════
@@ -140,9 +227,12 @@ def main():
     # ══ 3) G-EX: تجاوز التوقيع والأساس ═══════════════════════════════════
     with tempfile.TemporaryDirectory() as tmp:
         ledger = consent.ConsentLedger(os.path.join(tmp, "consent"))
+        svc_sec3 = ta.verify(ta.mint(auth.KIND_SERVICE, "session-sec3", clients={"client-1"}))
+        client_sec3 = ta.verify(ta.mint(auth.KIND_CLIENT, "client-1"))
         ledger.grant_client_consent(
             reference="consent-A", client_id="client-1", purpose="training",
             usage_scope=["training_only"], granted_at="2026-11-20",
+            principal=svc_sec3,
         )
         src = os.path.join(tmp, "src.json")
         json.dump({"plan": 1}, open(src, "w", encoding="utf-8"))
@@ -184,8 +274,8 @@ def main():
         check("G-EX: توقيع EX-0001 لا يُعاد استخدامه لاعتماد EX-0002", _raises(lambda: gw.approve(c2, {"document": doc1, "signature": ta.owner_sign(doc1)}), gateway.GatewayError))
         # مرجع وهمي
         check("G-EX: مرجع موافقة مخترع (غير موجود بالسجل) يرفض", not gw.submit(cand(basis={"kind": "client_consent", "reference": "consent-ghost"}))["passed"])
-        # أساس مسحوب
-        ledger.withdraw("consent-A", "2026-11-24", "انسحاب")
+        # أساس مسحوب — العميل نفسه يسحب موافقته عبر هويته الموثقة
+        ledger.withdraw("consent-A", "2026-11-24", principal=client_sec3, reason="انسحاب")
         d2 = auth.gex_approval_document("قرار-2", "2026-11-24", hashlib.sha256(json.dumps({"k": 3}, ensure_ascii=False).encode()).hexdigest(), cand()["origin"]["sha256"])
         check("G-EX: أساس مسحوب بالسجل يمنع الاعتماد الجديد حتى بتوقيع سليم", _raises(lambda: gw.approve(cand(content=json.dumps({"k": 3}, ensure_ascii=False)), {"document": d2, "signature": ta.owner_sign(d2)}), gateway.GatewayError))
         check("G-EX: الأمثلة القديمة للأساس المسحوب تبقى للتدقيق وتُستبعد من الدفعات", gw.check_withdrawal("consent-A") == ["EX-0001"] and os.path.exists(os.path.join(tmp, "approved", "EX-0001.json")))
@@ -198,18 +288,111 @@ def main():
         cov = gw.verify_integrity()
         check("G-EX: تعديل ختم تصنيف الاستخدام بعد الاعتماد يُكشف", not cov["ok"] and any("تصنيف الاستخدام" in m["problem"] for m in cov["coverage"]["fingerprint_mismatches"]))
 
-    # ══ 4) سجل الموافقات: الحدود والقواعد ════════════════════════════════
+    # ══ 4) سجل الموافقات: الهوية والصلاحية والحدود والقواعد ════════════════
     check("الموافقات: سجل داخل شجرة git مرفوض (بيانات المستوى أ)", _raises(lambda: consent.ConsentLedger(os.path.join(REPO_ROOT, "consent-test")), ValueError))
     with tempfile.TemporaryDirectory() as tmp:
         ledger = consent.ConsentLedger(os.path.join(tmp, "cl"))
-        ledger.grant_client_consent(reference="r1", client_id="client-1", purpose="training", usage_scope=["training_only"], granted_at="2026-11-20")
-        check("الموافقات: مرجع مكرر مرفوض (لا التباس في الهوية)", _raises(lambda: ledger.grant_client_consent(reference="r1", client_id="client-2", purpose="training", usage_scope=["training_only"], granted_at="2026-11-21"), consent.ConsentLedgerError))
-        check("الموافقات: نطاق استخدام غير صالح مرفوض", _raises(lambda: ledger.grant_client_consent(reference="r2", client_id="client-1", purpose="training", usage_scope=["everything"], granted_at="2026-11-20"), consent.ConsentLedgerError))
-        check("الموافقات: موافقة بلا غرض مرفوضة", _raises(lambda: ledger.grant_client_consent(reference="r3", client_id="client-1", purpose="", usage_scope=["training_only"], granted_at="2026-11-20"), consent.ConsentLedgerError))
-        check("الموافقات: انسحاب فوق أساس غير موجود مرفوض", _raises(lambda: ledger.withdraw("ghost", "2026-11-24", ""), consent.ConsentLedgerError))
-        ledger.withdraw("r1", "2026-11-24", "سبب")
-        check("الموافقات: الانسحاب لا يمحو المنح (سجل التدقيق كامل)", len([e for e in ledger.all_events() if e["type"] == "grant"]) == 1 and ledger.lookup("r1")["status"] == "withdrawn")
-        check("الموافقات: انسحاب مكرر مرفوض (لا تشويش السجل)", _raises(lambda: ledger.withdraw("r1", "2026-11-25", "مرة أخرى"), consent.ConsentLedgerError))
+        svc_c1 = ta.verify(ta.mint(auth.KIND_SERVICE, "svc-c1", clients={"client-1"}))
+        svc_c2 = ta.verify(ta.mint(auth.KIND_SERVICE, "svc-c2", clients={"client-2"}))
+        cl1 = ta.verify(ta.mint(auth.KIND_CLIENT, "client-1"))
+        cl2 = ta.verify(ta.mint(auth.KIND_CLIENT, "client-2"))
+        admin_p = ta.verify(ta.mint(auth.KIND_ADMIN, "reviewer-9", all_clients=True))
+        owner_p = ta.verify(ta.mint(auth.KIND_OWNER, "owner-4"))
+
+        def _grant(ref, client_id, principal, **over):
+            kw = dict(reference=ref, client_id=client_id, purpose="training",
+                      usage_scope=["training_only"], granted_at="2026-11-20",
+                      principal=principal)
+            kw.update(over)
+            return lambda: ledger.grant_client_consent(**kw)
+
+        # الوضع المشروع (موجب) + توثيق هوية المسجل الموثقة
+        ev = ledger.grant_client_consent(reference="r1", client_id="client-1", purpose="training",
+                                         usage_scope=["training_only"], granted_at="2026-11-20", principal=svc_c1)
+        check("الموافقات (موجب): خدمة داخل نطاقها تسجل موافقة عميلها", ev["type"] == "grant")
+        check("الموافقات: الحدث يحمل هوية المسجل الموثقة لا نصًا من المستدعي",
+              ev["recorded_by"] == svc_c1.describe() and ev["recorded_by_kind"] == "service")
+
+        # لا هوية ولا نص مماثل — الإثبات بتوقيع متحقق حصرًا
+        check("الموافقات: تسجيل منح بلا هوية (None) مرفوض",
+              _raises_any(_grant("r2", "client-1", None), (consent.ConsentLedgerError, TypeError)))
+        check("الموافقات: الشكل النصي القديم granted_by=\"owner\" مرفوض جذريًا",
+              _raises_any(lambda: ledger.grant_client_consent(reference="r2", client_id="client-1",
+                                                              purpose="training", usage_scope=["training_only"],
+                                                              granted_at="2026-11-20", granted_by="owner"),
+                          (consent.ConsentLedgerError, TypeError)))
+        check("الموافقات: دور نصي «owner» كإثبات هوية مرفوض",
+              _raises(_grant("r2", "client-1", "owner"), consent.ConsentLedgerError))
+        check("الموافقات: قاموس يدّعي هوية المالك مرفوض",
+              _raises(_grant("r2", "client-1", {"kind": "owner", "granted_by": "owner"}), consent.ConsentLedgerError))
+        check("الموافقات: هوية مزيفة بـ__new__ مرفوضة من السجل",
+              _raises(_grant("r2", "client-1", forged_new), consent.ConsentLedgerError))
+
+        # النطاق والصلاحية لمن يسجل موافقة العميل
+        check("الموافقات: خدمة خارج نطاق العميل لا تسجل موافقته",
+              _raises(_grant("r3", "client-1", svc_c2), consent.ConsentLedgerError))
+        check("الموافقات: أدمن (حوكمة مراجعة) لا يسجل موافقة عميل",
+              _raises(_grant("r3", "client-1", admin_p), consent.ConsentLedgerError))
+        check("الموافقات: عميل لا يسجل موافقة عميل آخر",
+              _raises(_grant("r3", "client-1", cl2), consent.ConsentLedgerError))
+        ev_self = ledger.grant_client_consent(reference="r-self", client_id="client-1", purpose="training",
+                                              usage_scope=["training_only"], granted_at="2026-11-20", principal=cl1)
+        check("الموافقات (موجب): العميل يسجل موافقته هو", ev_self["recorded_by"].startswith("client:client-1"))
+        ev_owner_rec = ledger.grant_client_consent(reference="r-owner-rec", client_id="client-1", purpose="training",
+                                                   usage_scope=["training_only"], granted_at="2026-11-20", principal=owner_p)
+        check("الموافقات (موجب): المالك يسجل موافقة عميل", ev_owner_rec["recorded_by"].startswith("owner:"))
+
+        # القواعد الأساسية للسجل (فوق هوية موثقة)
+        check("الموافقات: مرجع مكرر مرفوض (لا التباس في الهوية)",
+              _raises(_grant("r1", "client-2", svc_c2, granted_at="2026-11-21"), consent.ConsentLedgerError))
+        check("الموافقات: نطاق استخدام غير صالح مرفوض",
+              _raises(_grant("r4", "client-1", svc_c1, usage_scope=["everything"]), consent.ConsentLedgerError))
+        check("الموافقات: موافقة بلا غرض مرفوضة",
+              _raises(_grant("r5", "client-1", svc_c1, purpose=""), consent.ConsentLedgerError))
+
+        # أساس المالك — مالك متحقق بمفتاحه حصرًا
+        def _owner_basis(ref, principal, **over):
+            kw = dict(reference=ref, purpose="training", usage_scope=["training_only"],
+                      decided_at="2026-11-21", decision_ref="قرار-1", principal=principal)
+            kw.update(over)
+            return lambda: ledger.record_owner_basis(**kw)
+
+        check("الموافقات: خدمة لا تسجل أساس مالك", _raises(_owner_basis("ob-1", svc_c1), consent.ConsentLedgerError))
+        check("الموافقات: أدمن لا يسجل أساس مالك", _raises(_owner_basis("ob-1", admin_p), consent.ConsentLedgerError))
+        check("الموافقات: عميل لا يسجل أساس مالك", _raises(_owner_basis("ob-1", cl1), consent.ConsentLedgerError))
+        ev_ob = ledger.record_owner_basis(reference="ob-1", purpose="training", usage_scope=["training_only"],
+                                          decided_at="2026-11-21", decision_ref="قرار-1", principal=owner_p)
+        check("الموافقات (موجب): المالك يسجل أساسه والحدث يوثق هويته",
+              ev_ob["recorded_by"].startswith("owner:") and ev_ob["decision_ref"] == "قرار-1")
+
+        # الانسحاب — محكوم بالهوية والنطاق ونوع الأساس
+        check("الموافقات: انسحاب فوق أساس غير موجود مرفوض",
+              _raises(lambda: ledger.withdraw("ghost", "2026-11-24", principal=cl1), consent.ConsentLedgerError))
+        check("الموافقات: انسحاب بلا هوية مرفوض",
+              _raises_any(lambda: ledger.withdraw("r1", "2026-11-24"), (consent.ConsentLedgerError, TypeError)))
+        check("الموافقات: انسحاب بهوية نصية «owner» مرفوض",
+              _raises(lambda: ledger.withdraw("r1", "2026-11-24", principal="owner"), consent.ConsentLedgerError))
+        w1 = ledger.withdraw("r1", "2026-11-24", principal=cl1, reason="سبب")
+        check("الموافقات (موجب): العميل يسحب موافقته هو", w1["recorded_by"].startswith("client:client-1"))
+        check("الموافقات: الانسحاب لا يمحو المنح (سجل التدقيق كامل)",
+              len([e for e in ledger.all_events() if e["type"] == "grant"]) == 4
+              and ledger.lookup("r1")["status"] == "withdrawn")
+        check("الموافقات: انسحاب مكرر مرفوض (لا تشويش السجل)",
+              _raises(lambda: ledger.withdraw("r1", "2026-11-25", principal=cl1, reason="مرة أخرى"), consent.ConsentLedgerError))
+        check("الموافقات: عميل لا ينسحب عن موافقة غيره",
+              _raises(lambda: ledger.withdraw("r-self", "2026-11-24", principal=cl2), consent.ConsentLedgerError))
+        check("الموافقات: أدمن لا يسجل انسحابًا (أقل صلاحية)",
+              _raises(lambda: ledger.withdraw("r-self", "2026-11-24", principal=admin_p), consent.ConsentLedgerError))
+        check("الموافقات: خدمة خارج النطاق لا تسجل انسحابًا",
+              _raises(lambda: ledger.withdraw("r-self", "2026-11-24", principal=svc_c2), consent.ConsentLedgerError))
+        w2 = ledger.withdraw("r-self", "2026-11-24", principal=svc_c1, reason="طلب العميل في الجلسة")
+        check("الموافقات (موجب): خدمة نطاقها تسجل انسحاب عميلها", w2["recorded_by"].startswith("service:svc-c1"))
+        check("الموافقات: أساس المالك لا يُسحب إلا بهويته (خدمة مرفوضة)",
+              _raises(lambda: ledger.withdraw("ob-1", "2026-11-24", principal=svc_c1), consent.ConsentLedgerError))
+        check("الموافقات: أساس المالك لا يُسحب إلا بهويته (أدمن مرفوض)",
+              _raises(lambda: ledger.withdraw("ob-1", "2026-11-24", principal=admin_p), consent.ConsentLedgerError))
+        w3 = ledger.withdraw("ob-1", "2026-11-24", principal=owner_p, reason="قرار مالك")
+        check("الموافقات (موجب): المالك يسحب أساسه", w3["recorded_by"].startswith("owner:"))
 
     # ══ 5) التخزين: تزامن فعلي بعمليات متعددة + استعادة ══════════════════
     with tempfile.TemporaryDirectory() as tmp:

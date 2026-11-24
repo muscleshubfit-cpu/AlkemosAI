@@ -6,11 +6,28 @@
 للموافقات والانسحابات، مرتبطًا بهوية العميل والغرض ونطاق الاستخدام والتاريخ…
 اجعل التحقق من أساس الاستخدام يعتمد على هذا السجل، لا على قيم يرسلها المرشح»)
 
+(استكمال 16-تتمة — بأمر المالك: اربط عمليات السجل بهوية موثقة وصلاحيات
+محددة؛ لا يُقبل «granted_by="owner"» ولا أي نص مماثل إثبات هوية):
+- **كل كتابة في السجل تتطلب هوية موثقة** (`Principal` من
+  `TokenAuthority.verify` بعد تحقق التوقيع — `auth.is_verified_principal`):
+  النصوص والقواميس والأدوار المزعومة وكائنات الهوية المزيفة مرفوضة جذريًا.
+- **من يسجل موافقة العميل يُتحقق منه:** توثيق منح موافقة عميل يقتضي هوية
+  تملك صلاحية `consent:record` **ويغطي نطاقها العميل المعني** — الخدمة
+  المرتبطة بجلسة العميل، أو العميل نفسه، أو المالك؛ الأدمن (مراجعة حوكمة)
+  لا يسجل موافقات (أقل صلاحية).
+- **أساس المالك بتوقيع المالك:** تسجيل أساس يقرره المالك يقتضي هوية مالك
+  متحققة (رمز owner موقع بمفتاح المالك المستقل — لا تصنعه بيانات المستدعي
+  ولا مفتاح المنصة) وتملك صلاحية `consent:owner_basis`.
+- **الانسحاب محكوم بالهوية:** عميل يسحب موافقته هو، أو خدمة نطاقها تتيح
+  تسجيل انسحاب عميلها، أو المالك لأي أساس — بلا هوية صالحة لا انسحاب.
+- الحدث يوثق **هوية المسجل الموثقة** (`recorded_by` = وصف الهوية المتحققة)
+  لا نصًا يمرره المستدعي.
+
 القوانين:
 - **إلحاقي فقط (append-only):** المنح والانسحاب أحداث تُلحق ولا تُعدل — سجل
   التدقيق كامل دائمًا حتى بعد الانسحاب (الانسحاب لا يمحو الموافقة بل يعلوها).
 - **مرتبط بالهوية والغرض والنطاق والتاريخ:** كل منح يحمل معرف العميل والغرض
-  ونطاق الاستخدام المصرح (تصنيفات G-EX) وتاريخ المنح ومنحه.
+  ونطاق الاستخدام المصرح (تصنيفات G-EX) وتاريخ المنح وهوية المسجل الموثقة.
 - **خارج المستودع العام:** سجل يحمل هوية العملاء = بيانات المستوى أ — حارس
   المسار نفسه يرفض أي جذر داخل شجرة git (الخطة §2-أ / SECURITY §3).
 - **الكتابة ذرية تحت قفل** (fsafety) — لا فقد أحداث عند التزامن أو الانقطاع.
@@ -20,8 +37,16 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Dict, List, Optional
 
+from .. import auth
+from ..auth import (
+    KIND_OWNER,
+    PERM_CONSENT_OWNER_BASIS,
+    PERM_CONSENT_RECORD,
+    PERM_CONSENT_WITHDRAW,
+)
 from ..fsafety import (
     FileLock,
     append_recovery_note,
@@ -56,6 +81,50 @@ def _valid_usage_scope(scope) -> bool:
     if not isinstance(scope, (list, tuple)) or not scope:
         return False
     return all(u in USAGE_CLASSES for u in scope)
+
+
+def _require_verified_recorder(
+    principal,
+    *,
+    permission: Optional[str] = None,
+    client_id: Optional[str] = None,
+    owner_only: bool = False,
+) -> "auth.Principal":
+    """بوابة الكتابة الموثوقة — لا حدث موثوق بلا هوية متحققة وصلاحية.
+
+    - الهوية يجب أن تكون `Principal` موثقة من `TokenAuthority.verify` (النوع
+      بعينه بصفاته مكتملة) — النصوص والأدوار المزعومة والكائنات المزيفة
+      مرفوضة قبل أي فحص لاحق.
+    - الرمز المنتهي لا يسجل أحداثًا (هوية ميتة = قلم مرفوع).
+    - `owner_only`: حدث من قرارات المالك — لا يقبل إلا هوية مالك (وهي حصرًا
+      بتوقيع مفتاح المالك المستقل).
+    - `permission`: صلاحية محددة يجب أن تحملها الهوية.
+    - `client_id`: نطاق الهوية يجب أن يغطي العميل المعني.
+    """
+    if not auth.is_verified_principal(principal):
+        raise ConsentLedgerError(
+            "تسجيل الأحداث الموثوقة يتطلب هوية موثقة (Principal من "
+            "TokenAuthority.verify بعد تحقق التوقيع) — النصوص والأدوار "
+            "المزعومة ومنها granted_by=\"owner\" لا تُقبل إثبات هوية أبدًا"
+        )
+    if principal.expires_at and principal.expires_at <= int(time.time()):
+        raise ConsentLedgerError("انتهت صلاحية هوية التسجيل — رمز ميت لا يسجل أحداثًا موثوقة")
+    if owner_only and principal.kind != KIND_OWNER:
+        raise ConsentLedgerError(
+            f"هذا الحدث من قرارات المالك — الهوية {principal.describe()} ليست مالكًا متحققًا "
+            "(هوية المالك تنشأ حصرًا من رمز موقع بمفتاح المالك المستقل)"
+        )
+    if permission and not principal.can(permission):
+        raise ConsentLedgerError(
+            f"الهوية {principal.describe()} لا تملك الصلاحية '{permission}' — "
+            "لا تسجيل أحداث موثوقة بلا صلاحية"
+        )
+    if client_id is not None and not principal.can_access_client(client_id):
+        raise ConsentLedgerError(
+            f"الهوية {principal.describe()} لا يغطي نطاقها العميل '{client_id}' — "
+            "لا تسجيل لموافقة عميل خارج نطاق الهوية (عزل بيانات العملاء)"
+        )
+    return principal
 
 
 class ConsentLedger:
@@ -99,10 +168,14 @@ class ConsentLedger:
         purpose: str,
         usage_scope,
         granted_at: str,
-        granted_by: str = "owner",
+        principal: "auth.Principal",
         notes: str = "",
     ) -> Dict:
-        """توثيق منح موافقة عميل صريحة (opt-in) — مرجع فريد لا يُعاد استخدامه."""
+        """توثيق منح موافقة عميل صريحة (opt-in) — مرجع فريد لا يُعاد استخدامه.
+
+        `principal` = هوية موثقة تسجل المنح: خدمة نطاقها يغطي العميل، أو
+        العميل نفسه، أو المالك — لا نص `granted_by` من المستدعي أبدًا.
+        """
         reference = (reference or "").strip()
         if not reference:
             raise ConsentLedgerError("مرجع الموافقة مطلوب")
@@ -114,6 +187,9 @@ class ConsentLedger:
             raise ConsentLedgerError(
                 f"نطاق الاستخدام يجب أن يكون قائمة غير فارغة من {USAGE_CLASSES}"
             )
+        recorder = _require_verified_recorder(
+            principal, permission=PERM_CONSENT_RECORD, client_id=client_id
+        )
         with FileLock(self.lock_path):
             events = self._read_events_locked()
             for ev in events:
@@ -129,7 +205,8 @@ class ConsentLedger:
                 "purpose": purpose,
                 "usage_scope": sorted(set(usage_scope)),
                 "granted_at": granted_at,
-                "granted_by": granted_by,
+                "recorded_by": recorder.describe(),
+                "recorded_by_kind": recorder.kind,
                 "notes": notes,
                 "recorded_at": utc_now_iso(),
             }
@@ -142,8 +219,14 @@ class ConsentLedger:
         usage_scope,
         decided_at: str,
         decision_ref: str,
+        principal: "auth.Principal",
     ) -> Dict:
-        """توثيق أساس استخدام يقرره المالك (ليس موافقة عميل) — يوثق بقراره."""
+        """توثيق أساس استخدام يقرره المالك (ليس موافقة عميل) — يوثق بقراره.
+
+        `principal` = هوية مالك متحققة حصرًا (رمز owner موقع بمفتاح المالك
+        المستقل) تملك صلاحية `consent:owner_basis` — لا خدمة ولا أدمن ولا
+        نص «owner» يمرره المستدعي.
+        """
         reference = (reference or "").strip()
         if not reference:
             raise ConsentLedgerError("مرجع الأساس مطلوب")
@@ -155,6 +238,9 @@ class ConsentLedger:
             raise ConsentLedgerError(
                 f"نطاق الاستخدام يجب أن يكون قائمة غير فارغة من {USAGE_CLASSES}"
             )
+        recorder = _require_verified_recorder(
+            principal, owner_only=True, permission=PERM_CONSENT_OWNER_BASIS
+        )
         with FileLock(self.lock_path):
             events = self._read_events_locked()
             for ev in events:
@@ -170,20 +256,27 @@ class ConsentLedger:
                 "purpose": purpose,
                 "usage_scope": sorted(set(usage_scope)),
                 "granted_at": decided_at,
-                "granted_by": "owner",
+                "recorded_by": recorder.describe(),
+                "recorded_by_kind": recorder.kind,
                 "decision_ref": decision_ref,
                 "recorded_at": utc_now_iso(),
             }
             return self._append_event_locked(event)
 
-    def withdraw(self, reference: str, withdrawn_at: str, reason: str = "") -> Dict:
+    def withdraw(self, reference: str, withdrawn_at: str, principal: "auth.Principal", reason: str = "") -> Dict:
         """توثيق انسحاب — حدث يعلو المنح ولا يمحه (سجل التدقيق يبقى كاملًا).
 
-        يمكن للمالك سحب أساس owner_basis بنفس الآلية (السحب يعم كل الأنواع).
+        هوية الساحب تُتحقق: العميل يسحب موافقته هو، أو الخدمة ذات النطاق
+        تسجل انسحاب عميلها، أو المالك يسحب أي أساس بما فيه أساسه — بلا
+        هوية موثقة وصلاحية `consent:withdraw` لا انسحاب. سحب أساس المالك
+        (`owner_basis`) للمالك حصرًا لأنه قراره.
         """
         reference = (reference or "").strip()
         if not reference:
             raise ConsentLedgerError("مرجع الأساس المسحوب مطلوب")
+        # الهوية أولًا — لا يُكشف أي شيء من السجل لمستدعٍ غير مخول
+        # (حتى رسائل الرفض لا تميز مرجعًا موجودًا من غائب قبل التحقق).
+        recorder = _require_verified_recorder(principal, permission=PERM_CONSENT_WITHDRAW)
         with FileLock(self.lock_path):
             events = self._read_events_locked()
             grant = next(
@@ -200,11 +293,25 @@ class ConsentLedger:
             )
             if already:
                 raise ConsentLedgerError(f"الأساس '{reference}' مسحوب سابقًا — لا تكرار للحدث")
+            # سحب أساس المالك قرار مالك حصرًا؛ أما موافقة العميل فيسحبها
+            # العميل نفسه أو خدمة نطاقها أو المالك — والنطاق يحسم دائمًا.
+            if grant.get("kind") == BASIS_OWNER_DECIDED:
+                if recorder.kind != KIND_OWNER:
+                    raise ConsentLedgerError(
+                        f"سحب أساس المالك قرار مالك حصرًا — الهوية {recorder.describe()} ليست مالكًا متحققًا"
+                    )
+            elif not recorder.can_access_client(grant.get("client_id")):
+                raise ConsentLedgerError(
+                    f"الهوية {recorder.describe()} لا يغطي نطاقها العميل "
+                    f"'{grant.get('client_id')}' — لا انسحاب عن موافقة عميل خارج النطاق"
+                )
             event = {
                 "type": "withdrawal",
                 "reference": reference,
                 "kind": grant.get("kind"),
                 "withdrawn_at": withdrawn_at,
+                "recorded_by": recorder.describe(),
+                "recorded_by_kind": recorder.kind,
                 "reason": reason,
                 "recorded_at": utc_now_iso(),
             }
@@ -237,6 +344,7 @@ class ConsentLedger:
             "purpose": grant.get("purpose"),
             "usage_scope": grant.get("usage_scope", []),
             "granted_at": grant.get("granted_at"),
+            "recorded_by": grant.get("recorded_by"),
             "withdrawn_at": (withdrawal or {}).get("withdrawn_at"),
             "withdrawal_reason": (withdrawal or {}).get("reason"),
             "events": [ev for ev in events if ev.get("reference") == reference],

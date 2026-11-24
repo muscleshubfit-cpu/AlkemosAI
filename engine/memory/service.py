@@ -44,13 +44,13 @@ class MemoryService:
     """
 
     def __init__(self, store: MemoryStore, principal: auth.Principal) -> None:
-        if isinstance(principal, str) or not isinstance(principal, auth.Principal):
+        if not auth.is_verified_principal(principal):
             raise MemoryServiceError(
-                "الأدوار لا تُمرر نصًا من المستدعي — الهوية تُوثق عبر طبقة المصادقة "
-                "(engine.auth.TokenAuthority.verify) ثم تُمرر Principal موثقة. "
-                "أي قيمة أخرى مرفوضة."
+                "الأدوار والهويات لا تُمرر من المستدعي — الهوية الموثقة تنشأ حصرًا عبر "
+                "طبقة المصادقة (engine.auth.TokenAuthority.verify) بعد تحقق التوقيع ثم "
+                "تُمرر Principal موثقة. أي قيمة أخرى (نص، قاموس، كائن مزيف) مرفوضة."
             )
-        if principal.expires_at and principal.expires_at <= _unix_now():
+        if principal.expires_at <= _unix_now():
             raise MemoryServiceError("انتهت صلاحية هوية الوصول — جدّد الرمز قبل الاستخدام")
         self.store = store
         self.principal = principal
