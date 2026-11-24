@@ -29,6 +29,13 @@
   وحسابه (sub) — فلا يعاد استخدامه لرمز آخر ولا لحساب آخر.
 - **قصير العمر إلزاميًا:** عمر البرهان ≤ ``PROOF_MAX_TTL_SECONDS`` (300ث)
   — لا برهان طويل العمر يُخزَّن ويعاد استخدامه.
+- **أحادي الاستخدام (jti — استكمال المراجعة):** كل برهان يحمل ``jti``
+  (هويته الفريدة) **إلزاميًا**؛ أول تحقق ناجح يستهلك الـjti في
+  ``ProofReplayCache`` (``engine/identity/replay.py`` — ذاكرة آمنة محدودة
+  زمنيًا تنجو من إعادة التشغيل) وكل إعادة استخدام للبرهان نفسه خلال
+  صلاحيته مرفوضة بصوت عالٍ — والاستهلاك يقع **بعد نجاح التحقق كله**
+  (التوقيع والربط والصلاحية) فلا برهان فاسد يحرق هوية برهان سواه ولا
+  يسمّم الذاكرة.
 - **fail-closed:** بلا مفاتيح خادم مثبتة في المحرك = بوابة الخدمة معطلة
   كليًا (`UnifiedIdentityService.authenticate_service` ترفض كل استدعاء).
 - **سياسة المفاتيح نفسها:** مفتاح الخادم العام يقبل فقط إن كان معياره
@@ -51,6 +58,7 @@ import json
 from typing import Dict, Optional, Tuple
 
 from .contract import IdentityError, canonical_account_id
+from .replay import JTI_MAX_LENGTH, ProofReplayCache, ProofReplayError
 
 #: الجمهور الإلزامي لبرهان الخادم — لا يشاركه أي برهان آخر
 PROOF_AUDIENCE = "alkemos-engine-service"
@@ -156,7 +164,13 @@ def parse_service_caller_keys(raw: str) -> Dict[str, Tuple[int, int]]:
 
 
 class ServiceProofVerifier:
-    """مدقق برهان الخادم — يتحقق فقط (لا يوقّع أبدًا — المفتاح الخاص عند الموقع)."""
+    """مدقق برهان الخادم — يتحقق فقط (لا يوقّع أبدًا — المفتاح الخاص عند الموقع).
+
+    ``replay_cache``: ذاكرة استهلاك الـjti — **حماية إعادة الاستخدام دائمًا
+    مفعّلة** (لا يمكن إيقافها): إن لم تُمرر ذاكرة صريحة أُنشئت ذاكرة
+    داخل العملية تلقائيًا؛ وللنشر الحي تُمرر ذاكرة ملفية من جذر التركيب
+    (تنجو من إعادة التشغيل — انظر adapters/identity).
+    """
 
     def __init__(
         self,
@@ -164,6 +178,7 @@ class ServiceProofVerifier:
         *,
         clock_skew_seconds: int = PROOF_CLOCK_SKEW_SECONDS,
         max_ttl_seconds: int = PROOF_MAX_TTL_SECONDS,
+        replay_cache: Optional[ProofReplayCache] = None,
     ) -> None:
         if not isinstance(public_keys, dict) or not public_keys:
             raise ServiceProofError(
@@ -180,6 +195,15 @@ class ServiceProofVerifier:
         self._keys = checked
         self._skew = int(clock_skew_seconds)
         self._max_ttl = int(max_ttl_seconds)
+        if replay_cache is not None and not isinstance(replay_cache, ProofReplayCache):
+            raise ServiceProofError(
+                "ذاكرة استهلاك البراهين يجب أن تكون ProofReplayCache — لا "
+                "كائنات مجهولة عند حد الثقة"
+            )
+        # حماية إعادة الاستخدام لا تُوقف أبدًا: بلا ذاكرة صريحة = ذاكرة
+        # داخل العملية (الحماية داخل العملية مضمونة دائمًا؛ النشر الحي
+        # يمرر ذاكرة ملفية تنجو من إعادة التشغيل من جذر التركيب).
+        self._replay = replay_cache if replay_cache is not None else ProofReplayCache()
 
     @property
     def key_ids(self) -> Tuple[str, ...]:
@@ -292,7 +316,8 @@ class ServiceProofVerifier:
                 "البراهين قصيرة العمر حصرًا"
             )
 
-        # التوقيع أخيرًا — فوق كل ما سبق
+        # التوقيع — قبل الاستهلاك حصرًا: لا يُسجَّل jti لبرهان لم يثبت أنه
+        # موقع بمفتاح خادم الموقع المثبت (وإلا لأمكن حرق هويات براهين سواها)
         message = (
             header_b64.encode("ascii") + b"." + payload_b64.encode("ascii")
         )
@@ -300,3 +325,27 @@ class ServiceProofVerifier:
             raise ServiceProofError(
                 "توقيع برهان الخادم غير صالح — لم يصدر عن خادم الموقع الموثوق"
             )
+
+        # jti: هوية البرهان أحادية الاستخدام — إلزامية (فشل مغلق: لا برهان
+        # بلا هوية فريدة يمكن استهلاكها ومنع إعادة استخدامه)
+        jti = payload.get("jti")
+        if (
+            not isinstance(jti, str)
+            or not jti.strip()
+            or len(jti) > JTI_MAX_LENGTH
+        ):
+            raise ServiceProofError(
+                f"jti في برهان الخادم مطلوب إلزاميًا (نص غير فارغ بطول "
+                f"≤{JTI_MAX_LENGTH} حرفًا) — برهان بلا هوية أحادية الاستخدام "
+                "مرفوض (منع إعادة الاستخدام)"
+            )
+
+        # الاستهلاك أحادي الاستخدام — **بعد نجاح التحقق كله حصرًا** (التوقيع
+        # والربط والصلاحية): البراهين الفاسدة لا تحرق هويات سواها؛ إعادة
+        # استخدام البرهان خلال صلاحيته (jti مستهلك) مرفوضة بصوت عالٍ.
+        # أجل المدخل = انتهاء البرهان + سماحية الساعة (تغطية عقدة متأخرة
+        # عن ساعة الموقع)؛ يسقط المدخل بعد أجله فورًا (ذاكرة محدودة زمنيًا).
+        try:
+            self._replay.consume(jti, valid_until=exp + self._skew, now=current)
+        except ProofReplayError as exc:
+            raise ServiceProofError(str(exc)) from exc

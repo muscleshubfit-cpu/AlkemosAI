@@ -73,11 +73,27 @@ def build_identity_service(*, environ=None) -> UnifiedIdentityService:
     # (مراجعة دفعة 17) حد الثقة لبوابة جلسة الخدمة: مفاتيح خادم الموقع
     # العامة المثبتة تفعّل بوابة الخدمة؛ غيابها = البوابة معطلة (فشل مغلق
     # — امتلاك رمز جلسة العميل وحده لا يفتحها أبدًا).
+    # (استكمال المراجعة) ذاكرة استهلاك البراهين (jti) **إلزامية** عند
+    # تفعيل المفاتيح: مسار مطلق خارج شجرة git (ALKEMOS_SERVICE_PROOF_REPLAY_ROOT)
+    # — بلا ذاكرة باقية عبر إعادة التشغيل تنفتح نافذة إعادة استخدام عند
+    # كل إقلاع، فالبناء يرفض بصوت عالٍ (فشل مغلق لا تليين).
     service_proof_verifier = None
     if settings.SERVICE_CALLER_KEYS:
+        from engine.identity.replay import ProofReplayCache
         from engine.identity.server_proof import ServiceProofVerifier
 
-        service_proof_verifier = ServiceProofVerifier(settings.SERVICE_CALLER_KEYS)
+        if not settings.SERVICE_PROOF_REPLAY_ROOT:
+            raise settings.IdentitySettingsError(
+                "ALKEMOS_SERVICE_PROOF_REPLAY_ROOT مطلوب عند تفعيل "
+                "ALKEMOS_SERVICE_CALLER_KEYS — مسار مطلق خارج شجرة git لذاكرة "
+                "استهلاك براهين الخادم (jti): بلا ذاكرة باقية عبر إعادة "
+                "التشغيل تنفتح نافذة إعادة استخدام البرهان عند كل إقلاع "
+                "(فشل مغلق — لا تليين)"
+            )
+        service_proof_verifier = ServiceProofVerifier(
+            settings.SERVICE_CALLER_KEYS,
+            replay_cache=ProofReplayCache(settings.SERVICE_PROOF_REPLAY_ROOT),
+        )
 
     return UnifiedIdentityService(
         provider,

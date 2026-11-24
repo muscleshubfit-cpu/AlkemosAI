@@ -21,6 +21,12 @@
   الرمز وهذا الحساب (تحقق بالمفتاح العام المثبت —
   `engine/identity/server_proof.py`)؛ وبلا مفاتيح خادم مثبتة البوابة
   معطلة كليًا (فشل مغلق). حد الثقة مُصمم ومختبر، ولا ربط إنتاجي هنا.
+- **ترتيب العمليات (استكمال المراجعة):** لا تسجيل في فهرس الحسابات ولا
+  أحداث ولا أي أثر جانبي قبل نجاح التحقق الكامل — في بوابة الخدمة:
+  التحقق من المنبع ثم برهان الخادم ثم سكّ الجلسة **ثم** التسجيل؛
+  الاستدعاء المرفوض لا يترك أثرًا (مختبر). والبرهان أحادي الاستخدام
+  (jti — `engine/identity/replay.py`): استهلاك jti بعد نجاح التحقق كله
+  ورفض إعادة الاستخدام خلال الصلاحية (مختبر مع التزامن وإعادة التشغيل).
 - **verify_engine_token**: التحقق من رمز محرك قائم (للمستهلكين/الواجهة
   المستقبلية) — نفس `TokenAuthority.verify` بلا مسار جديد.
 - **فهرس الحسابات** (إن وُفر): يسجل ظهور الحساب (بيانات هوية منفصلة عن
@@ -112,6 +118,12 @@ class UnifiedIdentityService:
         }
 
     def _verify_upstream(self, upstream_token, now: Optional[int]) -> VerifiedAccount:
+        """تحقق المنبع **فقط — بلا أي أثر جانبي** (لا فهرس ولا أحداث).
+
+        التسجيل في الفهرس مسؤولية الباب المُستدعى **بعد** نجاح تحققه الكامل
+        (أمر مراجعة الدفعة 17-استكمال: لا تسجيل ولا أحداث قبل نجاح برهان
+        الخادم في بوابة الخدمة؛ الأحداث أرشيف للظهور الموثق لا سجل محاولات).
+        """
         if not isinstance(upstream_token, str) or not upstream_token.strip():
             raise IdentityVerificationError(MSG_UPSTREAM_TOKEN_ONLY)
         account = self._provider.verify_upstream_token(upstream_token, now=now)
@@ -119,9 +131,12 @@ class UnifiedIdentityService:
             raise IdentityError(
                 "المزود أعاد قيمة ليست حسابًا موثقًا — خرق عقد المزود (فشل مغلق)"
             )
+        return account
+
+    def _record_account(self, account: VerifiedAccount) -> None:
+        """تسجيل الحساب في الفهرس (بيانات هوية فقط) — إن وُجد الفهرس."""
         if self._account_index is not None:
             self._account_index.record(account)
-        return account
 
     # -- الأبواب العامة -------------------------------------------------------
     def authenticate(self, upstream_token: str, *, now: Optional[int] = None) -> Dict:
@@ -129,8 +144,11 @@ class UnifiedIdentityService:
 
         المدخل الوحيد: رمز جلسة المنبع. لا يقبل البريد ولا الدور ولا أي
         بيانات يحددها المستدعي — إثبات الهوية والدور من مصدر الحساب حصرًا.
+        (السلوك الحالي محفوظ كما هو بأمر المالك: تسجيل الفهرس بعد نجاح
+        تحقق المنبع مباشرة.)
         """
         account = self._verify_upstream(upstream_token, now)
+        self._record_account(account)
         return self._resolver.resolve(account, now=now)
 
     def authenticate_service(
@@ -156,7 +174,17 @@ class UnifiedIdentityService:
         مشترك). بلا مفاتيح خادم مثبتة: البوابة معطلة كليًا (فشل مغلق)
         — لا استدعاء واحد يمر. الاستدعاءات غير الموثوقة (بلا برهان /
         برهان بمفتاح غير مثبت / برهان لرمز أو حساب آخر / منتهٍ / فوق
-        سقف العمر / توقيع فاسد) مرفوضة كلها بصوت عالٍ (مختبرة).
+        سقف العمر / توقيع فاسد / jti مستهلك — إعادة استخدام) مرفوضة
+        كلها بصوت عالٍ (مختبرة).
+
+        **ترتيب العمليات (أمر المراجعة — استكمال):** لا تسجيل في
+        AccountIndex ولا أحداث فهرس ولا أي أثر جانبي **قبل** نجاح
+        التحقق الكامل — تحقق المنبع ثم برهان الخادم ثم سكّ الجلسة؛
+        التسجيل يقع آخرًا بعد نجاح كل شيء، فالاستدعاء المرفوض (برهان
+        مرفوض · بوابة معطلة · جلسة منبع منتهية) لا يترك أثرًا واحدًا:
+        لا ظهور حساب ولا عدّاد جلسة ولا حدث. البرهان نفسه أحادي
+        الاستخدام (jti — ``engine/identity/replay.py``): استهلاكه بعد
+        نجاح التحقق كله، فإعادة استخدامه خلال صلاحيته مرفوضة.
         """
         account = self._verify_upstream(upstream_token, now)
         if self._service_proof_verifier is None:
@@ -171,7 +199,11 @@ class UnifiedIdentityService:
             upstream_token=upstream_token,
             now=now,
         )
-        return self._resolver.resolve_service(account, now=now)
+        session = self._resolver.resolve_service(account, now=now)
+        # الآثار الجانبية آخرًا — بعد نجاح التحقق الكامل حصرًا:
+        # استدعاء مرفوض = لا فهرس ولا أحداث ولا عدّاد.
+        self._record_account(account)
+        return session
 
     def verify_engine_token(self, token: str, *, now: Optional[int] = None) -> auth.Principal:
         """التحقق من رمز محرك قائم — نفس سلطة التحقق بلا مسار جديد."""

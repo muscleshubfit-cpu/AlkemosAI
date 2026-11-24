@@ -13,6 +13,10 @@
   الحساب لا بالبريد ولا بالدور).
 - `service` — `UnifiedIdentityService`: الباب العام (رمز منبع معتم فقط).
 - `accounts` — فهرس حسابات المحرك: بيانات الهوية منفصلة عن بيانات النموذج.
+- `server_proof` — مدقق برهان الخادم لبوابة جلسة الخدمة (حد الثقة).
+- `replay` — ذاكرة استهلاك براهين الخادم (jti): أحادية الاستخدام، آمنة
+  للخيوط والعمليات، محدودة زمنيًا، تنجو من إعادة التشغيل (استكمال
+  المراجعة — إغلاق فجوة إعادة استخدام البرهان).
 - `providers.jwks` — تحقق محلي بتوقيع غير متماثل (بروتوكول قياسي محايد).
 - `providers.static` — مزود محاكاة **للاختبار فقط** (لا يسجل للإنتاج).
 
@@ -39,6 +43,12 @@ from .contract import (  # noqa: F401
 from .resolver import IdentityResolver  # noqa: F401
 from .service import UnifiedIdentityService  # noqa: F401
 from .accounts import AccountIndex, AccountIndexError  # noqa: F401
+from .replay import (  # noqa: F401
+    CACHE_SCHEMA as PROOF_REPLAY_SCHEMA,  # noqa: F401
+    JTI_MAX_LENGTH,
+    ProofReplayCache,
+    ProofReplayError,
+)
 from .server_proof import (  # noqa: F401
     PROOF_AUDIENCE,
     PROOF_MAX_TTL_SECONDS,
@@ -60,8 +70,12 @@ __all__ = [
     "IdentityError",
     "IdentityResolver",
     "IdentityVerificationError",
+    "JTI_MAX_LENGTH",
     "PROOF_AUDIENCE",
     "PROOF_MAX_TTL_SECONDS",
+    "PROOF_REPLAY_SCHEMA",
+    "ProofReplayCache",
+    "ProofReplayError",
     "RSA_MIN_BITS",
     "ROLE_ADMIN",
     "ROLE_CLIENT",

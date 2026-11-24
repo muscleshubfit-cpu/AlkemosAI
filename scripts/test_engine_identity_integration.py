@@ -233,8 +233,12 @@ def _site_sign(key: dict, message: bytes) -> bytes:
 
 
 def _site_proof(key: dict, kid: str, account_id: str, upstream_token: str, *,
-                now: int, ttl: int = 120) -> str:
-    """برهان خادم الموقع (نموذج الموقّع الحقيقي عند التنفيذ الحي — D-17)."""
+                now: int, ttl: int = 120, jti: str = None) -> str:
+    """برهان خادم الموقع (نموذج الموقّع الحقيقي عند التنفيذ الحي — D-17).
+
+    (استكمال المراجعة) ``jti``: هوية البرهان الفريدة أحادية الاستخدام —
+    يولدها خادم الموقع طازجة لكل برهان (افتراضيًا هنا أيضًا).
+    """
     from engine.identity.server_proof import PROOF_AUDIENCE
 
     header = {"alg": "RS256", "typ": "JWT", "kid": kid}
@@ -244,6 +248,7 @@ def _site_proof(key: dict, kid: str, account_id: str, upstream_token: str, *,
         "tok": hashlib.sha256(upstream_token.encode("utf-8")).hexdigest(),
         "iat": now - 10,
         "exp": now + ttl,
+        "jti": jti if jti is not None else secrets.token_hex(16),
     }
     header_b64 = _b64e(json.dumps(header, separators=(",", ":")).encode())
     payload_b64 = _b64e(json.dumps(payload, separators=(",", ":")).encode())
@@ -381,6 +386,12 @@ def main():
             svc_a_mem = mem_service.MemoryService(
                 mem, svc.authenticate_service(TOK_A, server_proof=proof_a,
                                               now=NOW)["principal"])
+            # (استكمال المراجعة) البرهان أحادي الاستخدام: إعادة استخدامه خلال
+            # صلاحيته مرفوضة (jti مستهلك) — مع مزود الاستعلام الحقيقي.
+            check("حد الثقة (تكامل): إعادة استخدام نفس البرهان مرفوضة (jti — أحادي الاستخدام)",
+                  _raises(lambda: svc.authenticate_service(TOK_A, server_proof=proof_a,
+                                                           now=NOW),
+                          identity.ServiceProofError) is not None)
             for i in range(9):
                 svc_a_mem.record_exchange(CLIENT_A, [], f"رسالة {i}", "رد", [])
             _, stored = svc_a_mem.record_exchange(

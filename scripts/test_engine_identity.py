@@ -24,6 +24,17 @@
   التوقيع أصلًا) · الرموز المجهولة ترفض برسالة موحدة · جلسة الخدمة نطاقها
   الحساب نفسه · تبديل المزود يحفظ هوية الحساب نفسها (معرف الحساب مفتاح
   الوحدة).
+- **الترتيب والآثار الجانبية (استكمال المراجعة):** استدعاء بوابة الخدمة
+  المرفوض (برهان مرفوض · بوابة معطلة · جلسة منبع منتهية) لا يسجل حسابًا
+  في الفهرس ولا يضيف حدثًا ولا يلمس ذاكرة الاستهلاك — التسجيل بعد نجاح
+  التحقق الكامل حصرًا؛ وسلوك authenticate() محفوظ حرفيًا كما أمر المالك.
+- **jti (إغلاق فجوة إعادة الاستخدام — استكمال المراجعة):** البرهان بلا
+  هوية مرفوض · إعادة استخدام البرهان خلال صلاحيته مرفوضة (استهلاك بعد
+  نجاح التحقق كله — الفاشل لا يحرق الهويات) · الذاكرة تنجو من إعادة
+  التشغيل (ملف مستوى أ) وتتطهر بعد أجل المدخلات · التزامن فعلي: خيوط
+  وعمليات fork على نفس الذاكرة — فائز واحد حصرًا · تدوير المفاتيح
+  (نافذة مزدوجة وصارم) والذاكرة مستقلة عن المفاتيح · التلف صوت عالٍ
+  والسقف رفض صوت عالٍ · جذر التركيب يرفض مفاتيح بلا جذر ذاكرة.
 - **الفهرس (فصل الهوية عن النموذج):** بيانات الهوية في فهرس خارج المستودع
   ومفاتيح بيانات النموكز مختلفة تمامًا · التفضيلات محكومة بنطاق هوية
   موثقة · العبث يُكشف (تكامل ذاتي) · داخل شجرة git مرفوض.
@@ -51,6 +62,9 @@ from engine.identity import (  # noqa: E402
     ROLE_COACH,
     AccountIndex,
     IdentityResolver,
+    JTI_MAX_LENGTH,
+    ProofReplayCache,
+    ProofReplayError,
     ServiceProofError,
     ServiceProofVerifier,
     StaticProvider,
@@ -81,6 +95,21 @@ def _raises(fn, exc):
         return e
     except Exception:
         return None
+
+
+def _replay_race_worker(root: str):
+    """عامل سباق استهلاك jti عبر العمليات (fork) — فائز واحد حصرًا.
+
+    كل عملية تبني كائن الذاكرة الخاص بها (كما تفعل عمليات المحرك الحقيقية
+    عند الإقلاع) ثم تحاول استهلاك نفس jti: الذرية عبر flock + قراءة طازجة
+    من الملف داخل القفل — النجاح واحد والباقي ProofReplayError.
+    """
+    try:
+        cache = ProofReplayCache(root)
+        cache.consume("fork-race", valid_until=NOW + 100, now=NOW)
+        return True
+    except ProofReplayError:
+        return False
 
 
 # ── توليد RSA نقي للاختبار (لا مكتبات خارجية — قانون المحرك) ─────────────
@@ -196,12 +225,15 @@ def _jwks_provider(key: dict, kid: str, **kw):
 
 def _make_service_proof(key: dict, kid: str, account_id: str, upstream_token: str,
                         *, now: int, ttl: int = 120, aud=None, sub=None,
-                        iat=None, exp=None):
+                        iat=None, exp=None, jti=None, omit_jti=False):
     """برهان خادم اختباري — يوقّع بمفتاح الموقع الخاص (نموذج خادم الموقع).
 
     (مراجعة دفعة 17 — حد الثقة بين الموقع والمحرك): هكذا يبني خادم
     الموقع الموثوق برهانه المرتبط برمز الجلسة وحسابها؛ الأشكال المعطوبة
     (aud/sub/العمر) تُمرر عبر المعاملات لفحص الرفض.
+    (استكمال المراجعة) ``jti``: هوية البرهان الفريدة — تُولد طازجة لكل
+    برهان افتراضيًا (كما يفعل خادم الموقع الحقيقي)؛ التمرير الصريح
+    يختبر إعادة الاستخدام، و``omit_jti`` يختبر البرهان بلا هوية (مرفوض).
     """
     from engine.identity.server_proof import PROOF_AUDIENCE
 
@@ -212,6 +244,8 @@ def _make_service_proof(key: dict, kid: str, account_id: str, upstream_token: st
         "iat": (now - 10) if iat is None else iat,
         "exp": (now + ttl) if exp is None else exp,
     }
+    if not omit_jti:
+        payload["jti"] = secrets.token_hex(16) if jti is None else jti
     return _make_jwt(key, kid, payload)
 
 
@@ -444,6 +478,257 @@ def main():
                   ServiceProofError) is not None)
     check("إعداد مفاتيح الخادم: القيمة الفارغة = لا مفاتيح (البوابة معطلة)",
           parse_service_caller_keys("") == {})
+
+    # ══ 2-ج) الترتيب: الرفض بلا آثار جانبية (استكمال المراجعة — أمر المالك) ══
+    # لا تسجيل في AccountIndex ولا أحداث قبل نجاح التحقق الكامل من برهان
+    # الخادم في authenticate_service — التسجيل آخرًا بعد سكّ الجلسة، فالرفض
+    # (برهان مرفوض · بوابة معطلة · جلسة منبع منتهية) لا يترك أثرًا واحدًا.
+    print("══ 2-ج) الترتيب: رفض البرهان بلا آثار جانبية والتسجيل بعد النجاح ══")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        idx_root_o = os.path.join(tmpdir, "accounts-order")
+        replay_root_o = os.path.join(tmpdir, "replay-order")
+        idx_o = AccountIndex(idx_root_o)
+        verifier_o = ServiceProofVerifier(
+            {site_kid: (site_key["n"], site_key["e"])},
+            replay_cache=ProofReplayCache(replay_root_o),
+        )
+        svc_o = UnifiedIdentityService(static, ta, owner_account_ids=[OWNER],
+                                       account_index=idx_o,
+                                       service_proof_verifier=verifier_o)
+        bad_proofs = [
+            None, "..",
+            _make_service_proof(rogue_key, site_kid, CLIENT_A, "tok-a", now=NOW),
+            _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a", now=NOW,
+                                aud="someone-else"),
+            _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                now=NOW - 10_000),
+        ]
+        all_rejected = all(
+            _raises(lambda bp=bp: svc_o.authenticate_service(
+                "tok-a", server_proof=bp, now=NOW), ServiceProofError) is not None
+            for bp in bad_proofs
+        )
+        check("الترتيب: استدعاءات بوابة الخدمة المرفوضة كلها بصوت عالٍ",
+              all_rejected)
+        check("الترتيب: الرفض لا يسجل الحساب في الفهرس (لا ظهور ولا عدّاد)",
+              idx_o.get(CLIENT_A) is None and idx_o.events() == [])
+        check("الترتيب: الرفض لا يستهلك jti ولا يلمس ملف ذاكرة الاستهلاك",
+              not os.path.exists(os.path.join(replay_root_o, "proof-replay.json")))
+        svc_off = UnifiedIdentityService(static, ta, owner_account_ids=[OWNER],
+                                         account_index=idx_o)
+        check("الترتيب: بوابة معطلة كليًا (بلا مدقق) ترفض دون أي تسجيل",
+              _raises(lambda: svc_off.authenticate_service("tok-a", now=NOW),
+                      ServiceProofError) is not None
+              and idx_o.get(CLIENT_A) is None)
+        proof_ok = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a", now=NOW)
+        ok_sess = svc_o.authenticate_service("tok-a", server_proof=proof_ok, now=NOW)
+        entry_o = idx_o.get(CLIENT_A)
+        check("الترتيب: النجاح وحدده يسجل الحساب (ظهور أول بحدث واحد)",
+              ok_sess["token_kind"] == auth.KIND_SERVICE
+              and entry_o is not None and entry_o["sessions_count"] == 1
+              and len(idx_o.events()) == 1)
+        replay_rej = _raises(
+            lambda: svc_o.authenticate_service("tok-a", server_proof=proof_ok, now=NOW),
+            ServiceProofError)
+        check("إعادة الاستخدام: البرهان نفسه مرفوض (jti مستهلك) بلا أثر إضافي",
+              replay_rej is not None
+              and idx_o.get(CLIENT_A)["sessions_count"] == 1
+              and len(idx_o.events()) == 1)
+        static_dead = StaticProvider({
+            "tok-dead": {"account_id": CLIENT_C, "role": ROLE_CLIENT,
+                         "expires_at": NOW - 1},
+        })
+        verifier_dead = ServiceProofVerifier(
+            {site_kid: (site_key["n"], site_key["e"])},
+            replay_cache=ProofReplayCache(os.path.join(tmpdir, "replay-dead")),
+        )
+        svc_dead = UnifiedIdentityService(static_dead, ta, owner_account_ids=[OWNER],
+                                          account_index=idx_o,
+                                          service_proof_verifier=verifier_dead)
+        proof_dead = _make_service_proof(site_key, site_kid, CLIENT_C, "tok-dead",
+                                         now=NOW)
+        check("الترتيب: جلسة منبع منتهية (برهان صحيح) مرفوضة قبل أي تسجيل",
+              _raises(lambda: svc_dead.authenticate_service(
+                  "tok-dead", server_proof=proof_dead, now=NOW),
+                  identity.IdentityError) is not None
+              and idx_o.get(CLIENT_C) is None)
+        svc_keep = UnifiedIdentityService(static_dead, ta, owner_account_ids=[OWNER],
+                                          account_index=idx_o)
+        check("authenticate(): سلوكه الحالي محفوظ حرفيًا (التسجيل بعد نجاح "
+              "تحقق المنبع مباشرة — بلا مساس)",
+              _raises(lambda: svc_keep.authenticate("tok-dead", now=NOW),
+                      identity.IdentityError) is not None
+              and idx_o.get(CLIENT_C) is not None)
+
+    # ══ 2-د) jti: أحادية الاستخدام · إعادة التشغيل · التزامن · التدوير ══════
+    print("══ 2-د) jti: أحادية الاستخدام وإعادة التشغيل والتزامن وتدوير المفاتيح ══")
+    proof_no_jti = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                       now=NOW, omit_jti=True)
+    check("jti: برهان بلا هوية أحادية الاستخدام مرفوض (فشل مغلق)",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof=proof_no_jti,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    proof_empty_jti = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                          now=NOW, jti="")
+    proof_long_jti = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                         now=NOW, jti="x" * (JTI_MAX_LENGTH + 1))
+    check("jti: القيمة الفارغة/الطويلة جدًا مرفوضة (عقد النص المحدود)",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof=proof_empty_jti,
+                                                   now=NOW),
+                  ServiceProofError) is not None
+          and _raises(lambda: svc.authenticate_service("tok-a", server_proof=proof_long_jti,
+                                                       now=NOW),
+                      ServiceProofError) is not None)
+    proof_r1 = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a", now=NOW)
+    ok_first = svc.authenticate_service("tok-a", server_proof=proof_r1, now=NOW)
+    check("jti: أول استخدام للبرهان ينجح (الذاكرة لا تمنع المشروع)",
+          ok_first["token_kind"] == auth.KIND_SERVICE)
+    check("jti: إعادة استخدام البرهان نفسه خلال صلاحيته مرفوضة (الفجوة أُغلقت)",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof=proof_r1,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    proof_r2 = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a", now=NOW)
+    ok_second = svc.authenticate_service("tok-a", server_proof=proof_r2, now=NOW)
+    check("jti: برهان طازج (jti جديد) لنفس الرمز والحساب يعمل — لا حجب زائد",
+          ok_second["principal"].clients == frozenset({CLIENT_A}))
+    # الاستهلاك بعد النجاح حصرًا: برهان فاشل (منتهٍ) لا يحرق هويته
+    proof_burn = _make_service_proof(site_key, site_kid, CLIENT_B, "tok-b",
+                                     now=NOW - 10_000, jti="burn-me")
+    check("jti: برهان مرفوض (منتهٍ) لا يستهلك jti الخاص به",
+          _raises(lambda: svc.authenticate_service("tok-b", server_proof=proof_burn,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    proof_burn_ok = _make_service_proof(site_key, site_kid, CLIENT_B, "tok-b",
+                                        now=NOW, jti="burn-me")
+    check("jti: نفس الهوية تُقبل في برهان صحيح لاحق (لم تُسمّم بالفاشل)",
+          svc.authenticate_service("tok-b", server_proof=proof_burn_ok,
+                                   now=NOW)["principal"].principal_id == CLIENT_B)
+
+    # -- إعادة التشغيل: ذاكرة ملفية تنجو من الإقلاع --------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        replay_root_r = os.path.join(tmpdir, "replay-restart")
+        cache_r1 = ProofReplayCache(replay_root_r)
+        ver_r1 = ServiceProofVerifier({site_kid: (site_key["n"], site_key["e"])},
+                                      replay_cache=cache_r1)
+        svc_r1 = UnifiedIdentityService(static, ta, owner_account_ids=[OWNER],
+                                        service_proof_verifier=ver_r1)
+        proof_restart = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                            now=NOW, jti="restart-proof-1")
+        svc_r1.authenticate_service("tok-a", server_proof=proof_restart, now=NOW)
+        # محاكاة إعادة تشغيل المحرك: كائنات جديدة تمامًا على نفس المسار
+        cache_r2 = ProofReplayCache(replay_root_r)
+        ver_r2 = ServiceProofVerifier({site_kid: (site_key["n"], site_key["e"])},
+                                      replay_cache=cache_r2)
+        svc_r2 = UnifiedIdentityService(static, ta, owner_account_ids=[OWNER],
+                                        service_proof_verifier=ver_r2)
+        check("إعادة التشغيل: البرهان المستهلك قبل الإقلاع مرفوض بعده "
+              "(الذاكرة تنجو — ضمن صلاحيته)",
+              _raises(lambda: svc_r2.authenticate_service(
+                  "tok-a", server_proof=proof_restart, now=NOW + 10),
+                  ServiceProofError) is not None)
+        # الذاكرة محدودة زمنيًا: بعد أجل المدخل (exp+سماحية) يسقط
+        cache_r2.consume("probe", valid_until=NOW + 120, now=NOW)
+        check("إعادة التشغيل: المدخل يسقط بعد أجله (ذاكرة محدودة زمنيًا)",
+              cache_r2.size(now=NOW) == 2
+              and cache_r2.size(now=NOW + 120 + 61) == 0)
+        # الفساد الصريح صوت عالٍ لا إعادة تعيين صامتة
+        corrupt_path = os.path.join(replay_root_r, "proof-replay.json")
+        if os.path.exists(corrupt_path):
+            saved_text = open(corrupt_path, encoding="utf-8").read()
+            open(corrupt_path, "w", encoding="utf-8").write("{not json")
+            check("إعادة التشغيل: تلف ملف الذاكرة = خطأ عالٍ عند البناء "
+                  "(لا إعادة تعيين صامتة تمحو الاستهلاك)",
+                  _raises(lambda: ProofReplayCache(replay_root_r),
+                          ProofReplayError) is not None)
+            open(corrupt_path, "w", encoding="utf-8").write(saved_text)
+        # سقف الحجم: رفض صوت عالٍ لا إسقاط مدخل حي
+        cache_cap = ProofReplayCache(max_entries=2)
+        cache_cap.consume("a", valid_until=NOW + 100, now=NOW)
+        cache_cap.consume("b", valid_until=NOW + 100, now=NOW)
+        check("السقف: امتلاء الذاكرة = رفض صوت عالٍ (لا إسقاط مدخل حي)",
+              _raises(lambda: cache_cap.consume("c", valid_until=NOW + 100, now=NOW),
+                      ProofReplayError) is not None)
+        check("السقف: المدخل المنتهي يُطهَّر فيتسع المكان (التطهير قبل الرفض)",
+              cache_cap.consume("c", valid_until=NOW + 300, now=NOW + 200) is None
+              and cache_cap.size(now=NOW + 200) == 1)
+        check("مدقق البرهان: كائن ذاكرة مجهول مرفوض عند حد الثقة (نوع صريح)",
+              _raises(lambda: ServiceProofVerifier(
+                  {site_kid: (site_key["n"], site_key["e"])},
+                  replay_cache=object()),
+                  ServiceProofError) is not None)
+
+        # -- التزامن: خيوط وعمليات فعليّة على نفس الذاكرة الملفية ------------
+        import threading as _threading
+
+        cache_t = ProofReplayCache(os.path.join(tmpdir, "replay-threads"))
+        winners_t = []
+
+        def _race_thread():
+            try:
+                cache_t.consume("thread-race", valid_until=NOW + 100, now=NOW)
+                winners_t.append(1)
+            except ProofReplayError:
+                pass
+
+        threads = [_threading.Thread(target=_race_thread) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        check("التزامن: 8 خيوط تتنافس على jti واحد — فائز واحد حصرًا",
+              len(winners_t) == 1)
+
+        replay_root_f = os.path.join(tmpdir, "replay-fork")
+        ProofReplayCache(replay_root_f)   # تهيئة الملف والدليل
+        import multiprocessing as _mp
+
+        with _mp.get_context("fork").Pool(4) as pool:
+            fork_results = pool.map(_replay_race_worker, [replay_root_f] * 4)
+        check("التزامن: 4 عمليات fork تتنافس على jti واحد — فائز واحد حصرًا "
+              "(flock + قراءة طازجة داخل القفل)",
+              sum(1 for r in fork_results if r) == 1)
+
+    # -- تدوير المفاتيح: الذاكرة مستقلة عن مجموعة المفاتيح ------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        key_new = _gen_rsa_keypair()
+        kid_new = "site-backend-2"
+        cache_rot = ProofReplayCache(os.path.join(tmpdir, "replay-rot"))
+        ver_rot = ServiceProofVerifier({site_kid: (site_key["n"], site_key["e"])},
+                                       replay_cache=cache_rot)
+        proof_old_key = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                            now=NOW, jti="rotate-1")
+        ver_rot.verify(proof_old_key, account_id=CLIENT_A, upstream_token="tok-a",
+                       now=NOW)
+        # نافذة تدوير: المفتاحان معًا مثبتان والذاكرة نفسها مشتركة
+        ver_rot2 = ServiceProofVerifier(
+            {site_kid: (site_key["n"], site_key["e"]),
+             kid_new: (key_new["n"], key_new["e"])},
+            replay_cache=cache_rot)
+        check("التدوير: برهان المفتاح القديم المستهلك مرفوض عبر النافذة "
+              "(jti مستقل عن مجموعة المفاتيح)",
+              _raises(lambda: ver_rot2.verify(proof_old_key, account_id=CLIENT_A,
+                                              upstream_token="tok-a", now=NOW),
+                      ServiceProofError) is not None)
+        proof_new_key = _make_service_proof(key_new, kid_new, CLIENT_A, "tok-a",
+                                            now=NOW)
+        ver_rot2.verify(proof_new_key, account_id=CLIENT_A, upstream_token="tok-a",
+                        now=NOW)
+        check("التدوير: برهان المفتاح الجديد يعمل في نفس النافذة (المفتاحان معًا)",
+              True)
+        # تدوير صارم: القديم أُزيل بالكامل من المفاتيح المثبتة
+        ver_rot3 = ServiceProofVerifier({kid_new: (key_new["n"], key_new["e"])},
+                                        replay_cache=cache_rot)
+        proof_old_fresh = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                              now=NOW, jti="old-fresh-1")
+        proof_new_2 = _make_service_proof(key_new, kid_new, CLIENT_A, "tok-a",
+                                          now=NOW, jti="rotate-2")
+        ver_rot3.verify(proof_new_2, account_id=CLIENT_A, upstream_token="tok-a",
+                        now=NOW)
+        check("التدوير الصارم: برهان المفتاح القديم مرفوض (kid غير مثبت — "
+              "فشل مغلق) والجديد يعمل",
+              _raises(lambda: ver_rot3.verify(proof_old_fresh, account_id=CLIENT_A,
+                                              upstream_token="tok-a", now=NOW),
+                      ServiceProofError) is not None)
 
     check("التحقق من رمز المحرك: نفس سلطة TokenAuthority (بلا مسار جديد)",
           svc.verify_engine_token(sess_owner["token"], now=NOW).kind == auth.KIND_OWNER)
@@ -739,9 +1024,12 @@ def main():
         print("══ 5) العزل: الذاكرة والموافقات عبر جلسات الهوية ══")
         from engine.learning.consent import ConsentLedger
         store = mem_store.JsonlMemoryStore(mem_root)
-        # الكتابة عبر جلسة الخدمة (كبلة الموقع نيابة عن المستخدم — عقد الدفعة 17)
+        # الكتابة عبر جلسة الخدمة (بوابة الموقع نيابة عن المستخدم — عقد الدفعة 17)
+        # (jti طازج: البرهان أحادي الاستخدام والمدقق مشترك بين البابين)
+        proof_a_idx = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                          now=NOW)
         service_session_a = svc_idx.authenticate_service(
-            "tok-a", server_proof=proof_a, now=NOW)
+            "tok-a", server_proof=proof_a_idx, now=NOW)
         svc_a = mem_service.MemoryService(store, service_session_a["principal"])
         for i in range(9):   # إيقاع الاستخراج: كل 10 رسائل (نمط 0081)
             svc_a.record_exchange(CLIENT_A, [], f"رسالة {i}", "رد", [])
@@ -843,6 +1131,47 @@ def main():
               err_missing is not None and "ISSUER" in str(err_missing))
     finally:
         settings.IDENTITY_PROVIDER = saved_provider
+
+    # (استكمال المراجعة) جذر التركيب: تفعيل مفاتيح الخادم يقتضي جذر ذاكرة
+    # استهلاك البراهين (ALKEMOS_SERVICE_PROOF_REPLAY_ROOT) — فشل مغلق بلا
+    # تليين (بوابة خدمة بلا ذاكرة باقية عبر إعادة التشغيل = نافذة إعادة
+    # استخدام عند كل إقلاع).
+    saved_keys = settings.SERVICE_CALLER_KEYS
+    saved_replay_root = settings.SERVICE_PROOF_REPLAY_ROOT
+    saved_issuer = settings.IDENTITY_ISSUER
+    saved_anon = settings.IDENTITY_ANON_KEY
+    auth_env_backup = {k: os.environ.get(k) for k in (
+        "ALKEMOS_MEMORY_AUTH_KEY", "ALKEMOS_MEMORY_OWNER_KEY")}
+    try:
+        os.environ["ALKEMOS_MEMORY_AUTH_KEY"] = secrets.token_hex(48)
+        os.environ["ALKEMOS_MEMORY_OWNER_KEY"] = secrets.token_hex(48)
+        settings.IDENTITY_PROVIDER = "supabase-introspection"
+        settings.IDENTITY_ISSUER = "https://accounts.alkemos.test"
+        settings.IDENTITY_ANON_KEY = "anon-key-not-a-secret-test-only"
+        settings.SERVICE_CALLER_KEYS = {site_kid: (site_key["n"], site_key["e"])}
+        settings.SERVICE_PROOF_REPLAY_ROOT = ""
+        err_no_root = _raises(adapters_identity.build_identity_service,
+                              settings.IdentitySettingsError)
+        check("جذر التركيب: مفاتيح خادم بلا جذر ذاكرة jti ترفض البناء (فشل مغلق)",
+              err_no_root is not None and "REPLAY_ROOT" in str(err_no_root))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings.SERVICE_PROOF_REPLAY_ROOT = os.path.join(tmpdir, "replay-root")
+            built = adapters_identity.build_identity_service()
+            check("جذر التركيب: مفاتيح خادم + جذر ذاكرة jti = خدمة بمدقق بذاكرة "
+                  "باقية عبر الإقلاع",
+                  built.describe()["provider"] == "supabase-introspection"
+                  and os.path.isdir(settings.SERVICE_PROOF_REPLAY_ROOT))
+    finally:
+        settings.IDENTITY_PROVIDER = saved_provider
+        settings.IDENTITY_ISSUER = saved_issuer
+        settings.IDENTITY_ANON_KEY = saved_anon
+        settings.SERVICE_CALLER_KEYS = saved_keys
+        settings.SERVICE_PROOF_REPLAY_ROOT = saved_replay_root
+        for k, v in auth_env_backup.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
     passed = sum(1 for _, ok in results if ok)
     print(f"\n{passed}/{len(results)} اختبارًا ناجحًا")
