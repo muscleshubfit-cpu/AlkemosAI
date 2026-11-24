@@ -1,34 +1,127 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""إعدادات المحرك — هوية المالك الأساسية الوحيدة (دفعة 16 — أمر المالك).
+"""إعدادات المحرك — الهوية الموحدة من مصدر حساب Alkemos (دفعة 17 — ADR-0023).
 
-اعتماد ``OWNER_EMAIL_PRIMARY`` هوية المالك الأساسية **الوحيدة** في إعدادات
-المحرك: حساب مالك واحد لا غير — إنشاء حساب لغير هذا البريد مرفوض
-(``engine/owner_auth.py``)، والدخول وتغيير كلمة المرور واستعادة الوصول لهذا
-البريد وحده، وكل رمز مالك تُسكّه خدمة مصادقة المالك يحمله ``sub`` له.
+(دفعة 16 كانت تعتمد بريد المالك هويةً للمحرك — **أُلغي بدفعة 17 بقرار
+المالك: نظام الحساب الموحد**. البريد لم يعد هوية ولا يمنح ملكية؛ الملكية
+ترتبط بمعرف حساب قانوني من مصدر الهوية.)
 
 القوانين:
-- **البريد هوية معلنة لا سر**: هوية تعريفية عامة تسكن إعدادات المحرك — ليست
-  سرًّا ولا تعامل كذلك (SECURITY §1: لا أسرار في المستودع). سرّها يبقى في كلمة
-  المرور ورموز التحقق والمفاتيح — لا في البريد.
-- **توحيد القياس**: البريد يقارن ويخزن مقننًا (trim + lowercase) فلا انقسام
-  هوية بسبب حالة الأحرف أو فراغات.
-- **لا تجاوز بديلًا**: تغيير هوية المالك الأساسية قرار مالك موثق (DECISIONS)
-  لا متغير بيئة قابل للتلويث — القيمة هنا هي المرجع الوحيد الذي تقرأه كل
-  مكونات المحرك.
+- **Alkemos.com مصدر الهوية الأساسي:** لا مصادقة مستقلة في المحرك —
+  الإعدادات هنا تختار مزود التحقق وتربط معرفات حسابات المالك، وكل القيم
+  من متغيرات البيئة (SECURITY §1: لا أسرار ولا إعدادات إنتاج في المستودع).
+- **الملكية بمعرف الحساب لا بالبريد:** ``ALKEMOS_OWNER_ACCOUNT_IDS`` قائمة
+  معرفات UUID (مفصولة بفواصل) لحسابات المالك — كانونية عند القراءة،
+  والقائمة الفارغة = لا مالك متاح (فشل مغلق للعمليات الملكية حتى يضبطها
+  المالك — فجوة إقلاع موثقة في ADR-0023).
+- **مفتاح النشر (anon key) ليس سرًّا:** قيمة معلنة يستعملها مزود الاستعلام
+  في نداءات التحقق — تعيش في البيئة لا في المستودع (سياسة الأسرار §1
+  تخص الأسرار؛ هذا إعداد عام غير سري).
+- **لا تجاوز بديلًا:** تغيير معرفات حسابات المالك قرار مالك موثق (DECISIONS)
+  — القيم تقرأ من البيئة عند الاستيراد والمرجع الوحيد للاستهلاك هو
+  ``adapters/identity`` وخدمة الهوية.
+- **فشل مغلق:** الإعدادات الناقصة لا تسقط لقيم افتراضية مبتورة — جذر
+  التركيب يرفض البناء بصوت عالٍ عند النقص.
 """
 from __future__ import annotations
 
-#: هوية المالك الأساسية الوحيدة — أمر المالك (دفعة 16: اعتمادها هوية أساسية
-#: وحيدة في إعدادات المحرك). كل حسابات الملكية والمصادقة تُقيَّد بهذا البريد.
-OWNER_EMAIL_PRIMARY = "speerr@gmail.com"
+import os
+from typing import FrozenSet, Optional, Tuple
+
+from .identity.contract import canonical_account_id, parse_claim_path
 
 
-def normalize_owner_email(email: str) -> str:
-    """تقنين البريد: trim + lowercase — البريد هوية قياسية لا نص حر."""
-    return (email or "").strip().lower()
+class IdentitySettingsError(RuntimeError):
+    """إعداد هوية ناقص أو غير قانوني — صوت عالٍ لا قيم افتراضية داخلية."""
 
 
-def is_primary_owner_email(email: str) -> bool:
-    """هل هذا بريد المالك الأساسي؟ (المقارنة بعد التقنين)."""
-    return normalize_owner_email(email) == OWNER_EMAIL_PRIMARY
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise IdentitySettingsError(f"{name} يجب أن يكون عددًا صحيحًا — {raw!r}") from exc
+
+
+def _parse_owner_ids(raw: str) -> FrozenSet[str]:
+    """تقنين قائمة معرفات حسابات المالك من البيئة إلى UUID كانوني مجمد.
+
+    أي قيمة غير قانونية ترفض بصوت عالٍ (لا إسقاط صامت: معرف مالك تالف
+    قرار تصحيح لا تجاهل). البريد مرفوض هنا صراحة — ليس معرف حساب.
+    """
+    ids = set()
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.add(canonical_account_id(part))
+        except Exception as exc:
+            raise IdentitySettingsError(
+                f"ALKEMOS_OWNER_ACCOUNT_IDS تحوي قيمة غير قانونية ({part!r}): "
+                "المطلوب UUID من مصدر الحساب — البريد ليس معرف حساب (فشل مغلق)"
+            ) from exc
+    return frozenset(ids)
+
+
+#: اسم مزود التحقق من الهوية (قابل للتبديل بلا تغيير المستهلكين):
+#: supabase-introspection (الافتراضي — الاستعلام عند مصدر الحساب القائم)
+#: أو jwks (تحقق محلي بتوقيع غير متماثل عبر مفاتيح عامة منشورة).
+IDENTITY_PROVIDER: str = (
+    os.environ.get("ALKEMOS_IDENTITY_PROVIDER", "").strip() or "supabase-introspection"
+)
+
+#: رابط مصدر الحساب (مثال الإنتاج: رابط HTTPS لمشروع Supabase) — إلزامي
+#: لمزود الاستعلام، ويعمل قيمة iss المتوقعة لمزود JWKS.
+IDENTITY_ISSUER: str = os.environ.get("ALKEMOS_IDENTITY_ISSUER", "").strip()
+
+#: مفتاح النشر العام لمصدر الحساب (anon/publishable key) — **ليس سرًّا**
+#: (معلن في واجهة الموقع أصلًا)؛ يستخدمه مزود الاستعلام في نداءات التحقق.
+IDENTITY_ANON_KEY: str = os.environ.get("ALKEMOS_IDENTITY_ANON_KEY", "").strip()
+
+#: رابط مجموعة المفاتيح العامة (JWKS) — إلزامي لمزود jwks فقط.
+IDENTITY_JWKS_URL: str = os.environ.get("ALKEMOS_IDENTITY_JWKS_URL", "").strip()
+
+#: الجمهور المتوقع (aud) لرموز المنبع — اختياري (لمزود jwks).
+IDENTITY_AUDIENCE: Optional[str] = (
+    os.environ.get("ALKEMOS_IDENTITY_AUDIENCE", "").strip() or None
+)
+
+#: مسار مطالبة الدور داخل رمز المنبع (مفاتيح مفصولة بفواصل — اختياري لمزود
+#: jwks؛ يجب أن يكون مطالبة متحكمًا بها جهة الخدمة مثل app_metadata —
+#: المسارات المبدوءة بـuser_metadata ترفض في العقد).
+IDENTITY_ROLE_CLAIM_PATH: Optional[Tuple[str, ...]] = parse_claim_path(
+    os.environ.get("ALKEMOS_IDENTITY_ROLE_CLAIM_PATH", "").strip() or None
+)
+
+#: مسار مطالبة نطاق المدرب داخل رمز المنبع — اختياري لمزود jwks.
+IDENTITY_SCOPE_CLAIM_PATH: Optional[Tuple[str, ...]] = parse_claim_path(
+    os.environ.get("ALKEMOS_IDENTITY_SCOPE_CLAIM_PATH", "").strip() or None
+)
+
+#: مهلة نداءات التحقق (ثوانٍ) — فشل المهلة فشل مغلق.
+IDENTITY_HTTP_TIMEOUT_SECONDS: int = _int_env(
+    "ALKEMOS_IDENTITY_HTTP_TIMEOUT_SECONDS", 10
+)
+
+#: عمر رمز المحرك الافتراضي (ثوانٍ) — لا يتجاوز جلسة المنبع أبدًا
+#: (يسقّه المحلل) ولا سقف نوع الرمز في engine/auth.py.
+IDENTITY_ENGINE_TOKEN_TTL_SECONDS: int = _int_env(
+    "ALKEMOS_IDENTITY_ENGINE_TOKEN_TTL_SECONDS", 12 * 3600
+)
+
+#: معرفات حسابات المالك (UUID قانونية) — الملكية بمعرف الحساب لا بالبريد.
+#: الفارغة = لا عمليات ملكية متاحة (فشل مغلق) حتى يضبطها المالك.
+OWNER_ACCOUNT_IDS: FrozenSet[str] = _parse_owner_ids(
+    os.environ.get("ALKEMOS_OWNER_ACCOUNT_IDS", "")
+)
+
+
+def is_owner_account_id(account_id: str) -> bool:
+    """هل المعرف ضمن معرفات حسابات المالك؟ (بعد التقنين — بلا رفع استثناء)."""
+    try:
+        return canonical_account_id(account_id) in OWNER_ACCOUNT_IDS
+    except Exception:  # noqa: BLE001 — عقد المعرف: القيم غير القانونية ليست مالكًا
+        return False

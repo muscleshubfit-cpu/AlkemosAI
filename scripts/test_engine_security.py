@@ -27,6 +27,10 @@
 - التخزين: كتابة متزامنة بعمليات فعلية (لا فقد ولا تكرار معرفات) + استعادة.
 - الحدود: بيانات المستوى أ (ذاكرة وموافقات) داخل شجرة git مرفوضة.
 - استقلالية المحرك: لا استيراد لنموذج/مزود/استضافة في أي ملف engine/.
+- الهوية الموحدة (دفعة 17): **لا مسار مصادقة مستقل في المحرك** — وحدة
+  owner_auth محذوفة وهوية البريد ملغاة وصفر سطح دخول/كلمة مرور/استعادة
+  في engine/ وadapters/، وبريد المالك القديم لا يسكن الكود، وتواقيع
+  الباب الموحد لا تقبل بيانات هوية من المستدعي.
 كل المفاتيح هنا مولدة عشوائية في الذاكرة — لا أسرار في المستودع.
 """
 import hashlib
@@ -485,6 +489,58 @@ def main():
                 if f"import {bad}" in text or f"from {bad}" in text:
                     violations.append(f"{path}: {bad}")
     check("الاستقلالية: صفر استيراد لنموذج/مزود/استضافة في engine/ كلها", violations == [])
+
+    # ══ 7) الهوية الموحدة: لا مسار مصادقة مستقل في المحرك (دفعة 17) ═════
+    import importlib
+
+    check("مسار واحد: وحدة مصادقة المالك المستقلة حذفت (owner_auth غير موجود)",
+          _raises(lambda: importlib.import_module("engine.owner_auth"),
+                  ModuleNotFoundError) is not None
+          and not os.path.exists(os.path.join(REPO_ROOT, "engine", "owner_auth.py")))
+    check("مسار واحد: هوية البريد أُلغيت من الإعدادات (لا OWNER_EMAIL_PRIMARY)",
+          not hasattr(__import__("engine.settings", fromlist=["x"]), "OWNER_EMAIL_PRIMARY"))
+    _identity_mod = importlib.import_module("engine.identity")
+    check("مسار واحد: طبقة الهوية الموحدة موجودة كباب وحيد (engine/identity)",
+          hasattr(_identity_mod, "UnifiedIdentityService")
+          and hasattr(_identity_mod, "canonical_account_id")
+          and hasattr(_identity_mod, "VerifiedAccount"))
+
+    login_surface = []
+    for scan_dir in ("engine", "adapters"):
+        for dirpath, _dirs, files in os.walk(os.path.join(REPO_ROOT, scan_dir)):
+            for fn in files:
+                if not fn.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, fn)
+                text = open(path, encoding="utf-8").read()
+                for marker in ("hash_password", "verify_password", "begin_login",
+                               "complete_login", "bootstrap_owner", "recovery_code",
+                               "OWNER_EMAIL_PRIMARY", "scrypt"):
+                    if marker in text:
+                        login_surface.append(f"{path}: {marker}")
+    check("مسار واحد: صفر سطح دخول/كلمة مرور/استعادة في engine/ وadapters/ "
+          "(الدخول في مصدر الحساب وحده)",
+          login_surface == [])
+
+    email_leak = []
+    for scan_dir in ("engine", "adapters"):
+        for dirpath, _dirs, files in os.walk(os.path.join(REPO_ROOT, scan_dir)):
+            for fn in files:
+                if fn.endswith(".py"):
+                    path = os.path.join(dirpath, fn)
+                    if "speerr@gmail.com" in open(path, encoding="utf-8").read():
+                        email_leak.append(path)
+    check("ضد الانحدار: بريد المالك القديم لا يسكن كود المحرك/المحولات "
+          "(الملكية بمعرف الحساب لا بالبريد)",
+          email_leak == [])
+
+    import inspect
+    _idsvc = _identity_mod.UnifiedIdentityService
+    _params = set()
+    for m in ("authenticate", "authenticate_service", "verify_engine_token"):
+        _params |= set(inspect.signature(getattr(_idsvc, m)).parameters) - {"self"}
+    check("الباب الموحد: تواقيع الدخول لا تقبل بريدًا/دورًا/معرف حساب من المستدعي",
+          not (_params & {"email", "role", "account_id", "clients", "permissions"}))
 
     passed = sum(1 for _, ok in results if ok)
     print(f"\n{passed}/{len(results)} اختبارًا ناجحًا")
