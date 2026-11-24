@@ -25,6 +25,8 @@
 المدرب مغلق · طلبات المحرك تحمل رمز المستخدم + مفتاح النشر العام فقط
 (لا أسرار ولا بيانات هوية من المستدعي في الطلبات أصلًا).
 """
+import base64
+import hashlib
 import json
 import os
 import secrets
@@ -41,7 +43,7 @@ from adapters.identity.supabase_introspection import (  # noqa: E402
     SupabaseIntrospectionProvider,
 )
 from engine import auth, identity  # noqa: E402
-from engine.identity import UnifiedIdentityService  # noqa: E402
+from engine.identity import ServiceProofVerifier, UnifiedIdentityService  # noqa: E402
 from engine.learning.consent import ConsentLedger  # noqa: E402
 from engine.memory import service as mem_service  # noqa: E402
 from engine.memory import store as mem_store  # noqa: E402
@@ -164,6 +166,92 @@ class _Handler(BaseHTTPRequestHandler):
         self._reply(404, {"error": "not_found"})
 
 
+# ── مفتاح خادم الموقع لبرهان الخادم (حد الثقة — مراجعة دفعة 17) ───────────
+# نموذج خادم الموقع: يولد زوج RSA (2048)، يبني برهانًا مرتبطًا برمز الجلسة
+# وحسابها ويوقّعه بمفتاحه الخاص؛ المحرك يتحقق بالمفتاح العام المثبت فقط.
+def _site_is_probable_prime(n: int, rounds: int = 24) -> bool:
+    if n < 2:
+        return False
+    for p in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+        if n % p == 0:
+            return n == p
+    d, r = n - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        r += 1
+    for _ in range(rounds):
+        a = 2 + secrets.randbelow(n - 3)
+        x = pow(a, d, n)
+        if x in (1, n - 1):
+            continue
+        for _ in range(r - 1):
+            x = pow(x, 2, n)
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _site_gen_prime(bits: int) -> int:
+    while True:
+        cand = secrets.randbits(bits) | (1 << (bits - 1)) | 1
+        if _site_is_probable_prime(cand):
+            return cand
+
+
+def _site_gen_keypair(bits: int = 2048) -> dict:
+    e = 65537
+    while True:
+        p = _site_gen_prime(bits // 2)
+        q = _site_gen_prime(bits - bits // 2)
+        if p == q:
+            continue
+        n = p * q
+        if n.bit_length() != bits:
+            continue
+        phi = (p - 1) * (q - 1)
+        try:
+            d = pow(e, -1, phi)
+        except ValueError:
+            continue
+        return {"n": n, "e": e, "d": d}
+
+
+def _b64e(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _site_sign(key: dict, message: bytes) -> bytes:
+    k = (key["n"].bit_length() + 7) // 8
+    digest_info = (
+        bytes.fromhex("3031300d060960864801650304020105000420")
+        + hashlib.sha256(message).digest()
+    )
+    em = b"\x00\x01" + b"\xff" * (k - len(digest_info) - 3) + b"\x00" + digest_info
+    return pow(int.from_bytes(em, "big"), key["d"], key["n"]).to_bytes(k, "big")
+
+
+def _site_proof(key: dict, kid: str, account_id: str, upstream_token: str, *,
+                now: int, ttl: int = 120) -> str:
+    """برهان خادم الموقع (نموذج الموقّع الحقيقي عند التنفيذ الحي — D-17)."""
+    from engine.identity.server_proof import PROOF_AUDIENCE
+
+    header = {"alg": "RS256", "typ": "JWT", "kid": kid}
+    payload = {
+        "aud": PROOF_AUDIENCE,
+        "sub": account_id,
+        "tok": hashlib.sha256(upstream_token.encode("utf-8")).hexdigest(),
+        "iat": now - 10,
+        "exp": now + ttl,
+    }
+    header_b64 = _b64e(json.dumps(header, separators=(",", ":")).encode())
+    payload_b64 = _b64e(json.dumps(payload, separators=(",", ":")).encode())
+    signing_input = header_b64.encode() + b"." + payload_b64.encode()
+    sig = _site_sign(key, signing_input)
+    return f"{header_b64}.{payload_b64}.{_b64e(sig)}"
+
+
 def _raises(fn, exc):
     try:
         fn()
@@ -202,10 +290,15 @@ def main():
             idx = identity.AccountIndex(os.path.join(tmpdir, "accounts"))
             mem = mem_store.JsonlMemoryStore(os.path.join(tmpdir, "memory"))
             ledger = ConsentLedger(os.path.join(tmpdir, "consent"))
+            site_key = _site_gen_keypair()
+            site_kid = "site-backend-1"
             svc = UnifiedIdentityService(
                 provider, ta,
                 owner_account_ids=[OWNER],
                 account_index=idx,
+                service_proof_verifier=ServiceProofVerifier(
+                    {site_kid: (site_key["n"], site_key["e"])}
+                ),
             )
 
             # ══ 1) التدفق الكامل عبر المزود الحقيقي ═══════════════════════
@@ -281,8 +374,13 @@ def main():
 
             # ══ 3) العزل عبر الهوية الموحدة (ذاكرة + موافقات) ═══════════════
             print("══ 3) العزل: ذاكرة وموافقات عبر جلسات مصدر واحد ══")
+            proof_a = _site_proof(site_key, site_kid, CLIENT_A, TOK_A, now=NOW)
+            check("حد الثقة (تكامل): رمز الجلسة وحده لا يفتح بوابة الخدمة — برهان الخادم لازم",
+                  _raises(lambda: svc.authenticate_service(TOK_A, now=NOW),
+                          identity.ServiceProofError) is not None)
             svc_a_mem = mem_service.MemoryService(
-                mem, svc.authenticate_service(TOK_A, now=NOW)["principal"])
+                mem, svc.authenticate_service(TOK_A, server_proof=proof_a,
+                                              now=NOW)["principal"])
             for i in range(9):
                 svc_a_mem.record_exchange(CLIENT_A, [], f"رسالة {i}", "رد", [])
             _, stored = svc_a_mem.record_exchange(

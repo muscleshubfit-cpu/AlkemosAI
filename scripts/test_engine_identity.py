@@ -51,9 +51,12 @@ from engine.identity import (  # noqa: E402
     ROLE_COACH,
     AccountIndex,
     IdentityResolver,
+    ServiceProofError,
+    ServiceProofVerifier,
     StaticProvider,
     UnifiedIdentityService,
     canonical_account_id,
+    parse_service_caller_keys,
 )
 from adapters.identity.jwks import JwksProvider  # noqa: E402
 from engine.memory import service as mem_service  # noqa: E402
@@ -112,15 +115,23 @@ def _gen_prime(bits: int) -> int:
             return cand
 
 
-def _gen_rsa_keypair(bits: int = 1024):
-    """زوج RSA للاختبار فقط (حجم اختباري — ليس للاستخدام الإنتاجي)."""
+def _gen_rsa_keypair(bits: int = 2048):
+    """زوج RSA للاختبار فقط (ليس للاستخدام الإنتاجي).
+
+    يضبط طول المعيار n بالضبط ``bits`` بتًا (إعادة المحاولة حتى يتحقق)
+    — ضروري لسياسة الحد الأدنى 2048 بت (مراجعة دفعة 17): مفتاح "2048"
+    أقصر من 2048 فعليًا يرفضه المزود، فالاختبارات تحتاج أطوالًا دقيقة
+    للموجبة (2048) والسالبة (512/1024/2047).
+    """
     e = 65537
     while True:
         p = _gen_prime(bits // 2)
-        q = _gen_prime(bits // 2)
+        q = _gen_prime(bits - bits // 2)
         if p == q:
             continue
         n = p * q
+        if n.bit_length() != bits:
+            continue
         phi = (p - 1) * (q - 1)
         try:
             d = pow(e, -1, phi)
@@ -183,6 +194,27 @@ def _jwks_provider(key: dict, kid: str, **kw):
     return provider, fetch_state
 
 
+def _make_service_proof(key: dict, kid: str, account_id: str, upstream_token: str,
+                        *, now: int, ttl: int = 120, aud=None, sub=None,
+                        iat=None, exp=None):
+    """برهان خادم اختباري — يوقّع بمفتاح الموقع الخاص (نموذج خادم الموقع).
+
+    (مراجعة دفعة 17 — حد الثقة بين الموقع والمحرك): هكذا يبني خادم
+    الموقع الموثوق برهانه المرتبط برمز الجلسة وحسابها؛ الأشكال المعطوبة
+    (aud/sub/العمر) تُمرر عبر المعاملات لفحص الرفض.
+    """
+    from engine.identity.server_proof import PROOF_AUDIENCE
+
+    payload = {
+        "aud": PROOF_AUDIENCE if aud is None else aud,
+        "sub": account_id if sub is None else sub,
+        "tok": hashlib.sha256(upstream_token.encode("utf-8")).hexdigest(),
+        "iat": (now - 10) if iat is None else iat,
+        "exp": (now + ttl) if exp is None else exp,
+    }
+    return _make_jwt(key, kid, payload)
+
+
 def main():
     results = []
 
@@ -241,7 +273,14 @@ def main():
                        "scope": [CLIENT_A, CLIENT_B]},
         "tok-coach-empty": {"account_id": COACH2, "role": ROLE_COACH, "scope": []},
     })
-    svc = UnifiedIdentityService(static, ta, owner_account_ids=[OWNER])
+    # (مراجعة دفعة 17) حد الثقة لبوابة الخدمة: مفاتيح خادم الموقع العامة
+    # المثبتة + برهان موقع بمفتاحه الخاص — لا جلسة خدمة برمز الجلسة وحده.
+    site_key = _gen_rsa_keypair()
+    site_kid = "site-backend-1"
+    site_verifier = ServiceProofVerifier({site_kid: (site_key["n"], site_key["e"])})
+    svc = UnifiedIdentityService(static, ta, owner_account_ids=[OWNER],
+                                 service_proof_verifier=site_verifier)
+    svc_ungated = UnifiedIdentityService(static, ta, owner_account_ids=[OWNER])
 
     sess_owner = svc.authenticate("tok-owner-client-role", now=NOW)
     check("الملكية: حساب مرتبط بدور client في المنبع يترجم مالكًا (الربط لا الدور)",
@@ -315,16 +354,96 @@ def main():
     check("العمر: بلا انتهاء منبع معروف = العمر الافتراضي (12 ساعة)",
           sess_long["expires_at"] == NOW + 12 * 3600)
 
-    # ── جلسة الخدمة: نطاق الحساب نفسه ─────────────────────────────────────
-    sess_svc = svc.authenticate_service("tok-a", now=NOW)
-    check("جلسة الخدمة: نطاقها حساب المستخدم نفسه مع كتابة الذاكرة (عقد كبلة الموقع)",
+    # ── جلسة الخدمة: نطاق الحساب نفسه + برهان الخادم (مراجعة دفعة 17) ──
+    proof_a = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a", now=NOW)
+    sess_svc = svc.authenticate_service("tok-a", server_proof=proof_a, now=NOW)
+    check("جلسة الخدمة: برهان خادم صحيح + رمز المنبع → نطاق الحساب نفسه مع كتابة الذاكرة",
           sess_svc["token_kind"] == auth.KIND_SERVICE
           and sess_svc["principal"].clients == frozenset({CLIENT_A})
           and sess_svc["principal"].can(auth.PERM_MEMORY_WRITE)
           and not sess_svc["principal"].can_access_client(CLIENT_B))
     check("جلسة الخدمة بلا حساب موثق: مرفوضة (رمز منبع فقط)",
-          _raises(lambda: svc.authenticate_service("رمز-مجهول", now=NOW),
+          _raises(lambda: svc.authenticate_service("رمز-مجهول", now=NOW,
+                                                   server_proof=proof_a),
                   identity.IdentityVerificationError) is not None)
+
+    # ══ 2-ب) حد الثقة لبوابة الخدمة (مراجعة دفعة 17 — أمر المالك) ═══════
+    # لا هوية service (كتابة الذاكرة) بمجرد امتلاك رمز جلسة العميل:
+    # الاستدعاء يجب أن يثبت أنه صادر من خادم الموقع الموثوق (برهان موقع
+    # RS256 بمفتاح خاص يقيم عند الموقع؛ المحرك يتحقق بالمفتاح العام
+    # المثبت فقط — لا سر مشترك)، وكل ما عدا ذلك يُرفض.
+    print("══ 2-ب) حد الثقة: بوابة الخدمة ببرهان الخادم ══")
+    check("حد الثقة: امتلاك رمز جلسة العميل وحده لا يفتح بوابة الخدمة (بلا برهان خادم)",
+          _raises(lambda: svc.authenticate_service("tok-a", now=NOW),
+                  ServiceProofError) is not None)
+    check("حد الثقة: برهان فارغ/معطوب الشكل مرفوض",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof="..", now=NOW),
+                  ServiceProofError) is not None)
+    check("حد الثقة: بلا مفاتيح خادم مثبتة البوابة معطلة كليًا (فشل مغلق)",
+          _raises(lambda: svc_ungated.authenticate_service("tok-a",
+                                                            server_proof=proof_a, now=NOW),
+                  ServiceProofError) is not None)
+    rogue_key = _gen_rsa_keypair()
+    rogue_proof = _make_service_proof(rogue_key, site_kid, CLIENT_A, "tok-a", now=NOW)
+    check("حد الثقة: برهان موقع بمفتاح غير المثبت مرفوض (لا تحقق بمفتاح مجهول)",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof=rogue_proof,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    check("حد الثقة: برهان لرمز جلسة آخر مرفوض (ربط البرهان بالرمز — لا إعادة استخدام)",
+          _raises(lambda: svc.authenticate_service("tok-b", server_proof=proof_a,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    proof_for_b = _make_service_proof(site_key, site_kid, CLIENT_B, "tok-b", now=NOW)
+    cross = _raises(lambda: svc.authenticate_service("tok-b", server_proof=proof_a,
+                                                      now=NOW),
+                    ServiceProofError)
+    ok_b = svc.authenticate_service("tok-b", server_proof=proof_for_b, now=NOW)
+    check("حد الثقة: برهان لحساب غير حساب الرمز مرفوض (ربط البرهان بالحساب)",
+          cross is not None and ok_b["principal"].clients == frozenset({CLIENT_B}))
+    expired_proof = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                        now=NOW - 10_000)
+    check("حد الثقة: البرهان المنتهي مرفوض",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof=expired_proof,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    long_proof = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                     now=NOW, ttl=3600)
+    check("حد الثقة: البرهان فوق سقف العمر (300ث) مرفوض — البراهين قصيرة حصرًا",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof=long_proof,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    future_proof = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                       now=NOW, iat=NOW + 500, exp=NOW + 600)
+    check("حد الثقة: البرهان الصادر في المستقبل مرفوض",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof=future_proof,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    bad_aud_proof = _make_service_proof(site_key, site_kid, CLIENT_A, "tok-a",
+                                        now=NOW, aud="someone-else")
+    check("حد الثقة: برهان بجمهور غير بوابة الخدمة مرفوض (لا يعاد لغرض آخر)",
+          _raises(lambda: svc.authenticate_service("tok-a", server_proof=bad_aud_proof,
+                                                   now=NOW),
+                  ServiceProofError) is not None)
+    # إعداد مفاتيح الخادم: الصيغة وسياسة القوة عند الإعداد
+    check("إعداد مفاتيح الخادم: الصيغة kid:n_hex:e_hex تعمل (مفتاح عام 2048+)",
+          list(parse_service_caller_keys(
+              f"{site_kid}:{hex(site_key['n'])}:{hex(site_key['e'])}"
+          ).keys()) == [site_kid])
+    weak_key = _gen_rsa_keypair(1024)
+    check("إعداد مفاتيح الخادم: مفتاح أضعف من 2048 بت مرفوض عند الإعداد (نفس السياسة)",
+          _raises(lambda: parse_service_caller_keys(
+              f"k:{hex(weak_key['n'])}:{hex(weak_key['e'])}"),
+                  ServiceProofError) is not None)
+    check("إعداد مفاتيح الخادم: صيغة ملتبسة مرفوضة بصوت عالٍ",
+          _raises(lambda: parse_service_caller_keys("kid:not-hex"),
+                  ServiceProofError) is not None)
+    check("إعداد مفاتيح الخادم: kid مكرر مرفوض",
+          _raises(lambda: parse_service_caller_keys(
+              f"{site_kid}:{hex(site_key['n'])}:{hex(site_key['e'])},"
+              f"{site_kid}:{hex(site_key['n'])}:{hex(site_key['e'])}"),
+                  ServiceProofError) is not None)
+    check("إعداد مفاتيح الخادم: القيمة الفارغة = لا مفاتيح (البوابة معطلة)",
+          parse_service_caller_keys("") == {})
 
     check("التحقق من رمز المحرك: نفس سلطة TokenAuthority (بلا مسار جديد)",
           svc.verify_engine_token(sess_owner["token"], now=NOW).kind == auth.KIND_OWNER)
@@ -454,6 +573,31 @@ def main():
           _raises(lambda: jwks_rot.verify_upstream_token(token_admin, now=NOW),
                    identity.IdentityVerificationError) is not None)
 
+    # ── (مراجعة دفعة 17) سياسة أحجام مفاتيح RSA: ≥2048 قبل التوقيع ─────
+    print("── JWKS: سياسة الحد الأدنى 2048 بت (قبل التحقق من التوقيع) ──")
+    for weak_bits in (512, 1024, 2047):
+        weak_pair = _gen_rsa_keypair(weak_bits)
+        weak_provider, _ = _jwks_provider(weak_pair, "weak-k")
+        weak_payload = {**payload_admin, "sub": CLIENT_A}
+        weak_token = _make_jwt(weak_pair, "weak-k", weak_payload)
+        err = _raises(lambda: weak_provider.verify_upstream_token(weak_token, now=NOW),
+                      identity.IdentityVerificationError)
+        check(f"JWKS: مفتاح {weak_bits} بت يرفض قبل التحقق من التوقيع (سياسة ≥2048)",
+              err is not None and "2048" in str(err))
+    strong_pair = _gen_rsa_keypair(2048)
+    strong_provider, _ = _jwks_provider(strong_pair, "strong-k")
+    strong_payload = {**payload_admin, "sub": CLIENT_A}
+    strong_token = _make_jwt(strong_pair, "strong-k", strong_payload)
+    check("JWKS: مفتاح 2048 بت (الحد الأدنى) يُقبل ويعمل",
+          strong_provider.verify_upstream_token(strong_token, now=NOW).account_id == CLIENT_A)
+    # مفتاح ضعيف برمز سليم التوقيع فعلًا: الرفع عند حل المفتاح قبل التوقيع
+    signed_weak_token = _make_jwt(weak_pair := _gen_rsa_keypair(512), "k-signed-weak",
+                                  strong_payload)
+    check("JWKS: رمز موقع فعلًا بمفتاح ضعيف لا يصل التوقيع أبدًا (الرفع عند المفتاح)",
+          _raises(lambda: _jwks_provider(weak_pair, "k-signed-weak")[0]
+                  .verify_upstream_token(signed_weak_token, now=NOW),
+                  identity.IdentityVerificationError) is not None)
+
     no_role_provider, _ = _jwks_provider(key, kid)
     plain_client_payload = {**payload_admin, "sub": CLIENT_A}
     del plain_client_payload["app_metadata"]
@@ -504,6 +648,7 @@ def main():
         mem_root = os.path.join(tmpdir, "model-memory")
         idx = AccountIndex(idx_root)
         svc_idx = UnifiedIdentityService(static, ta, owner_account_ids=[OWNER],
+                                         service_proof_verifier=site_verifier,
                                          account_index=idx)
         s = svc_idx.authenticate("tok-a", now=NOW)
         s2 = svc_idx.authenticate("tok-a", now=NOW + 5)
@@ -558,12 +703,45 @@ def main():
         check("الفهرس: العبث بالحالة يُكشف ببصمة التكامل (صوت عالٍ)",
               tamper_err is not None)
 
+        # ── (مراجعة دفعة 17) بيانات الفهرس ليست مصدر هوية أو صلاحيات ──────
+        # SHA-256 يكشف التلف لا العبث المتعمد (من يملك حق الكتابة يعيد حساب
+        # البصمة) — لذلك القاعدة: لا يُشتق من الفهرس أي قرار هوية/صلاحية.
+        from engine.identity.accounts import _state_integrity
+
+        state_doc = json.loads(original)
+        state_doc["accounts"][CLIENT_A]["roles_seen"] = ["admin"]   # تزوير
+        state_doc["integrity"] = _state_integrity(state_doc)        # ...بإعادة حساب البصمة
+        try:
+            open(state_path, "w", encoding="utf-8").write(
+                json.dumps(state_doc, ensure_ascii=False, indent=2))
+            s_after = svc_idx.authenticate("tok-a", now=NOW)
+        finally:
+            open(state_path, "w", encoding="utf-8").write(original)
+        check("حدود الفهرس (موثقة): إعادة كتابة الحالة وإعادة حساب البصمة تعبر فحص التكامل — لكن الهوية لا تتأثر",
+              s_after["token_kind"] == auth.KIND_CLIENT
+              and s_after["principal"].clients == frozenset({CLIENT_A})
+              and not s_after["principal"].can(auth.PERM_MEMORY_REVIEW))
+        forged_entry = dict(idx.get(CLIENT_A) or {})
+        forged_entry["roles_seen"] = ["admin", "owner"]
+        inmem = mem_store.InMemoryMemoryStore()
+        check("الفهرس: سجل الحساب (بعد حقن أدوار) ليس هوية — المستهلكات ترفضه",
+              not identity.is_verified_account(forged_entry)
+              and _raises(lambda: mem_service.MemoryService(inmem, forged_entry),
+                          mem_service.MemoryServiceError) is not None)
+        idx_events = idx.events()
+        check("الفهرس: أحداث السجل ليست إثبات هوية أو صلاحية (بيانات تدقيق أرشيفية)",
+              bool(idx_events)
+              and not identity.is_verified_account(idx_events[0])
+              and _raises(lambda: mem_service.MemoryService(inmem, idx_events[0]),
+                          mem_service.MemoryServiceError) is not None)
+
         # ══ 5) العزل عبر الهوية الموحدة (ذاكرة + موافقات) ═════════════════
         print("══ 5) العزل: الذاكرة والموافقات عبر جلسات الهوية ══")
         from engine.learning.consent import ConsentLedger
         store = mem_store.JsonlMemoryStore(mem_root)
         # الكتابة عبر جلسة الخدمة (كبلة الموقع نيابة عن المستخدم — عقد الدفعة 17)
-        service_session_a = svc_idx.authenticate_service("tok-a", now=NOW)
+        service_session_a = svc_idx.authenticate_service(
+            "tok-a", server_proof=proof_a, now=NOW)
         svc_a = mem_service.MemoryService(store, service_session_a["principal"])
         for i in range(9):   # إيقاع الاستخراج: كل 10 رسائل (نمط 0081)
             svc_a.record_exchange(CLIENT_A, [], f"رسالة {i}", "رد", [])

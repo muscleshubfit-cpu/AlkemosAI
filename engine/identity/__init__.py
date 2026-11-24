@@ -39,6 +39,14 @@ from .contract import (  # noqa: F401
 from .resolver import IdentityResolver  # noqa: F401
 from .service import UnifiedIdentityService  # noqa: F401
 from .accounts import AccountIndex, AccountIndexError  # noqa: F401
+from .server_proof import (  # noqa: F401
+    PROOF_AUDIENCE,
+    PROOF_MAX_TTL_SECONDS,
+    RSA_MIN_BITS,
+    ServiceProofError,
+    ServiceProofVerifier,
+    parse_service_caller_keys,
+)
 from .providers.static import StaticProvider  # noqa: F401
 
 # (مزودا الإنتاج — الاستعلام عند مصدر الحساب وJWKS — يعيشان في adapters/identity
@@ -52,9 +60,14 @@ __all__ = [
     "IdentityError",
     "IdentityResolver",
     "IdentityVerificationError",
+    "PROOF_AUDIENCE",
+    "PROOF_MAX_TTL_SECONDS",
+    "RSA_MIN_BITS",
     "ROLE_ADMIN",
     "ROLE_CLIENT",
     "ROLE_COACH",
+    "ServiceProofError",
+    "ServiceProofVerifier",
     "StaticProvider",
     "UnifiedIdentityService",
     "VerifiedAccount",
@@ -62,5 +75,6 @@ __all__ = [
     "is_canonical_account_id",
     "is_verified_account",
     "parse_claim_path",
+    "parse_service_caller_keys",
     "read_claim",
 ]

@@ -13,9 +13,14 @@
       → جلسة {principal, token, expires_at} للاستهلاك الداخلي
 
 قوانين الباب:
-- **رمز الخدمة للموقع**: `authenticate_service` يصدر جلسة خدمة نطاقها حساب
-  المستخدم نفسه (كتابة الذاكرة نيابة عنه) — للواجهة الخلفية للموقع فقط
-  بعد تحقق المنبع نفسه؛ لا جلسة خدمة بلا حساب موثق.
+- **رمز الخدمة للموقع + برهان الخادم (مراجعة دفعة 17):**
+  `authenticate_service` تصدر جلسة خدمة نطاقها حساب المستخدم نفسه (كتابة
+  الذاكرة نيابة عنه) — للواجهة الخلفية للموقع فقط. **امتلاك رمز جلسة
+  العميل وحده لا يكفي أبدًا**: على المستدعي تقديم **برهان خادم**
+  (`server_proof`) موقعًا RS256 بمفتاح خادم الموقع الخاص ومرتبطًا بهذا
+  الرمز وهذا الحساب (تحقق بالمفتاح العام المثبت —
+  `engine/identity/server_proof.py`)؛ وبلا مفاتيح خادم مثبتة البوابة
+  معطلة كليًا (فشل مغلق). حد الثقة مُصمم ومختبر، ولا ربط إنتاجي هنا.
 - **verify_engine_token**: التحقق من رمز محرك قائم (للمستهلكين/الواجهة
   المستقبلية) — نفس `TokenAuthority.verify` بلا مسار جديد.
 - **فهرس الحسابات** (إن وُفر): يسجل ظهور الحساب (بيانات هوية منفصلة عن
@@ -38,6 +43,7 @@ from .contract import (
     is_verified_account,
 )
 from .resolver import IdentityResolver
+from .server_proof import ServiceProofError, ServiceProofVerifier
 
 MSG_UPSTREAM_TOKEN_ONLY = (
     "الدخول يقبل رمز جلسة المنبع (Alkemos.com) حصرًا — لا بريد ولا دور ولا "
@@ -60,6 +66,7 @@ class UnifiedIdentityService:
         owner_account_ids: Iterable[str] = (),
         engine_token_ttl_seconds: Optional[int] = None,
         account_index: Optional[AccountIndex] = None,
+        service_proof_verifier: Optional[ServiceProofVerifier] = None,
     ) -> None:
         verify_fn = getattr(provider, "verify_upstream_token", None)
         if not callable(verify_fn):
@@ -70,6 +77,13 @@ class UnifiedIdentityService:
             raise IdentityError(
                 "الخدمة تتطلب TokenAuthority — مفاتيح المحرك شرط للسكّ"
             )
+        if service_proof_verifier is not None and not isinstance(
+            service_proof_verifier, ServiceProofVerifier
+        ):
+            raise IdentityError(
+                "مدقق برهان الخادم يجب أن يكون ServiceProofVerifier — لا كائنات "
+                "مجهولة عند حد الثقة"
+            )
         self._provider = provider
         self._authority = authority
         self._resolver = IdentityResolver(
@@ -78,6 +92,7 @@ class UnifiedIdentityService:
             engine_token_ttl_seconds=engine_token_ttl_seconds,
         )
         self._account_index = account_index
+        self._service_proof_verifier = service_proof_verifier
 
     # -- أدوات ---------------------------------------------------------------
     @property
@@ -118,13 +133,44 @@ class UnifiedIdentityService:
         account = self._verify_upstream(upstream_token, now)
         return self._resolver.resolve(account, now=now)
 
-    def authenticate_service(self, upstream_token: str, *, now: Optional[int] = None) -> Dict:
-        """تحقق المنبع ثم جلسة خدمة نطاقها حساب المستخدم (لكبلة الموقع).
+    def authenticate_service(
+        self,
+        upstream_token: str,
+        *,
+        server_proof: Optional[str] = None,
+        now: Optional[int] = None,
+    ) -> Dict:
+        """بوابة جلسة الخدمة — رمز المنبع **+ برهان خادم موثوق** حصرًا.
 
-        للواجهة الخلفية للموقع تعمل نيابة عن جلسة مستخدم محقق — كتابة
-        الذاكرة والتوثيق باسمه داخل نطاقه فقط. لا تمنح نطاق أي حساب آخر.
+        (مراجعة دفعة 17 — أمر المالك: لا هوية service ذات صلاحية كتابة
+        الذاكرة بمجرد امتلاك رمز جلسة العميل.) للواجهة الخلفية للموقع
+        تعمل نيابة عن جلسة مستخدم محقق — كتابة الذاكرة والتوثيق باسمه
+        داخل نطاقه فقط، ولا تمنح نطاق أي حساب آخر.
+
+        حد الثقة المعمول هنا: رمز المنبع وحده يثبت **الحساب** لا
+        **المستدعي** — فالرمز يملكه العميل نفسه. إثبات أن الاستدعاء صادر
+        من خادم الموقع الموثوق يأتي من ``server_proof``: برهان قصير العمر
+        موقع RS256 بمفتاح الخادم الخاص (يقيم عند الموقع حصرًا) ومرتبط
+        بهذا الرمز (بصمة sha256) وهذا الحساب (sub) وجمهور المحرك —
+        والتحقق بالمفتاح العام المثبت في إعداد المحرك فقط (لا سر
+        مشترك). بلا مفاتيح خادم مثبتة: البوابة معطلة كليًا (فشل مغلق)
+        — لا استدعاء واحد يمر. الاستدعاءات غير الموثوقة (بلا برهان /
+        برهان بمفتاح غير مثبت / برهان لرمز أو حساب آخر / منتهٍ / فوق
+        سقف العمر / توقيع فاسد) مرفوضة كلها بصوت عالٍ (مختبرة).
         """
         account = self._verify_upstream(upstream_token, now)
+        if self._service_proof_verifier is None:
+            raise ServiceProofError(
+                "بوابة جلسة الخدمة معطلة (فشل مغلق): لا مفاتيح برهان خادم "
+                "مثبتة (ALKEMOS_SERVICE_CALLER_KEYS) — هوية الخدمة ذات كتابة "
+                "الذاكرة لا تُمنح بامتلاك رمز جلسة العميل وحده أبدًا"
+            )
+        self._service_proof_verifier.verify(
+            server_proof,
+            account_id=account.account_id,
+            upstream_token=upstream_token,
+            now=now,
+        )
         return self._resolver.resolve_service(account, now=now)
 
     def verify_engine_token(self, token: str, *, now: Optional[int] = None) -> auth.Principal:

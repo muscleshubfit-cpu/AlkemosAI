@@ -70,9 +70,19 @@ def build_identity_service(*, environ=None) -> UnifiedIdentityService:
     # مفاتيح المحرك تُقرأ بعد صحة إعداد المزود — خاصة بالمحرك ولا تشارك الموقع.
     authority = TokenAuthority.from_env()
 
+    # (مراجعة دفعة 17) حد الثقة لبوابة جلسة الخدمة: مفاتيح خادم الموقع
+    # العامة المثبتة تفعّل بوابة الخدمة؛ غيابها = البوابة معطلة (فشل مغلق
+    # — امتلاك رمز جلسة العميل وحده لا يفتحها أبدًا).
+    service_proof_verifier = None
+    if settings.SERVICE_CALLER_KEYS:
+        from engine.identity.server_proof import ServiceProofVerifier
+
+        service_proof_verifier = ServiceProofVerifier(settings.SERVICE_CALLER_KEYS)
+
     return UnifiedIdentityService(
         provider,
         authority,
         owner_account_ids=settings.OWNER_ACCOUNT_IDS,
         engine_token_ttl_seconds=settings.IDENTITY_ENGINE_TOKEN_TTL_SECONDS,
+        service_proof_verifier=service_proof_verifier,
     )

@@ -29,6 +29,7 @@ import os
 from typing import FrozenSet, Optional, Tuple
 
 from .identity.contract import canonical_account_id, parse_claim_path
+from .identity.server_proof import parse_service_caller_keys
 
 
 class IdentitySettingsError(RuntimeError):
@@ -116,6 +117,16 @@ IDENTITY_ENGINE_TOKEN_TTL_SECONDS: int = _int_env(
 #: الفارغة = لا عمليات ملكية متاحة (فشل مغلق) حتى يضبطها المالك.
 OWNER_ACCOUNT_IDS: FrozenSet[str] = _parse_owner_ids(
     os.environ.get("ALKEMOS_OWNER_ACCOUNT_IDS", "")
+)
+
+#: مفاتيح خادم الموقع العامة لبوابة جلسة الخدمة (برهان الخادم — مراجعة
+#: دفعة 17). الصيغة: عناصر مفصولة بفواصل، كل عنصر ``kid:n_hex:e_hex``.
+#: هذه مفاتيح **عامة** (تحقق فقط) لا أسرار؛ المفتاح الخاص يقيم عند
+#: خادم الموقع حصرًا. القيمة الفارغة = بوابة جلسة الخدمة معطلة كليًا
+#: (فشل مغلق — امتلاك رمز جلسة العميل وحده لا يفتحها أبدًا). أي قيمة
+#: ملتبسة أو مفتاح أضعف من 2048 بت يُرفض بصوت عالٍ عند الاستيراد.
+SERVICE_CALLER_KEYS = parse_service_caller_keys(
+    os.environ.get("ALKEMOS_SERVICE_CALLER_KEYS", "")
 )
 
 
