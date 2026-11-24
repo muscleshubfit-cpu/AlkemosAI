@@ -13,6 +13,10 @@
   Principal مباشرة ببيانات المستدعي (هوية مالك أو صلاحيات موسعة) + الوراثة
   + التعديل بعد الإنشاء + الكائنات المزيفة (__new__ وبط البط — duck typing)
   + رموز owner موقع بمفتاح المنصة (المالك بمفتاحه المستقل حصرًا)**.
+- **تزوير واقعي داخل العملية (الإغلاق ليس حدًّا أمنيًا):** بناء هوية بقراءة
+  خلايا الإغلاق (`__closure__`) ينجح بنيويًا — موثق كحد ثقة معلن لا كدفاع
+  مزعوم — والقبض يتم كريبتوغرافيًا (`TokenAuthority.attest`: لا مفتاح لا
+  هوية)، مع بطلان شهادة أي هوية مُسّت حقلها أو شهادتها.
 - عزل العملاء: خدمة/عميل/أدمن خارج النطاق — معرفة client_id لا تكفي.
 - سجل الموافقات: **تسجيل المنح/الأساس/الانسحاب بهوية موثقة وصلاحية محددة —
   بلا هوية أو بنص granted_by="owner" أو بخارج النطاق أو بغير المالك لأساس
@@ -43,6 +47,28 @@ from engine.memory import service, store  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOW = "2026-11-24T00:00:00.000Z"
+
+
+# ── مهاجم واقعي داخل العملية: قراءة خلايا الإغلاق وبناء هوية كاملة الحقول ────
+def _closure_forge(kind, principal_id, clients=frozenset(), all_clients=True,
+                  permissions=None, attestation="شهادة-مدعاة-بلا-مفتاح"):
+    """استخراج مفتاح الإنشاء من خلايا إغلاق `Principal.__init__` وبناء هوية.
+
+    نموذج التهديد الواقعي: إغلاق Python ليس حدًّا أمنيًا ولا يُدَّعى كذلك —
+    البناء ينجح بنيويًا (النوع ذاته وصفاته مكتملة)، والقبض عليه يجب أن يكون
+    كريبتوغرافيًا في `attest` (لا يملك مفتاح التوقيع فشهادته مدعاة).
+    """
+    free = auth.Principal.__init__.__code__.co_freevars
+    cells = auth.Principal.__init__.__closure__
+    creation_key = cells[free.index("_creation_key")].cell_contents
+    return auth.Principal(
+        principal_id, kind, frozenset(clients), bool(all_clients),
+        frozenset(permissions if permissions is not None
+                  else auth._KIND_MAX_PERMS[kind]),
+        9999999999,
+        _creation=creation_key,
+        _attestation=attestation,
+    )
 
 
 def _raises(fn, exc):
@@ -196,6 +222,34 @@ def main():
         "الهوية: مفتاح الإنشاء ليس خاصية وحدة (لا يمكن استيراده من الخارج)",
         not hasattr(auth, "_creation_key") and not hasattr(auth, "_PRINCIPAL_CREATION_KEY"),
     )
+
+    # ══ 1-ج) التزوير الواقعي: الإغلاق ليس حدًّا أمنيًا — الشهادة الكريبتوغرافية ══
+    genuine_owner_p2 = ta.verify(ta.mint(auth.KIND_OWNER, "owner-real2"))
+    genuine_svc_p2 = ta.verify(ta.mint(auth.KIND_SERVICE, "session-ok2", clients={"c1"}))
+    check("الشهادة: هوية أصلية (مالك وخدمة) تعبر attest موجبًا",
+          ta.attest(genuine_owner_p2) is True and ta.attest(genuine_svc_p2) is True)
+    check("الشهادة: سلطة بمفاتيح أخرى ترفض هوية هذه السلطة (attest بحد المفتاح)",
+          wrong_authority.attest(genuine_owner_p2) is False)
+    forged_owner_p2 = _closure_forge(auth.KIND_OWNER, "owner-real2")
+    check("التزوير الواقعي: بناء هوية مالك عبر خلايا الإغلاق ينجح بنيويًا (الإغلاق ليس حدًّا أمنيًا — واقع موثق)",
+          auth.is_verified_principal(forged_owner_p2) is True)
+    check("التزوير الواقعي: الهوية المبنية بلا مفتاح ترفضها الشهادة الكريبتوغرافية (attest)",
+          ta.attest(forged_owner_p2) is False)
+    forged_svc_c1 = _closure_forge(auth.KIND_SERVICE, "session-forged", clients={"c1"}, all_clients=False)
+    check("حدود الثقة (موثق): البوابة البنيوية MemoryService تعبرها الهوية المبنية داخل العملية — الحد البنيوي ليس كريبتوغرافيًا",
+          service.MemoryService(mem0, forged_svc_c1) is not None)
+    check("حدود الثقة: الهوية نفسها ترفضها الشهادة عند حامل المفاتيح — لا مفتاح لا هوية",
+          ta.attest(forged_svc_c1) is False)
+    tampered_p = ta.verify(ta.mint(auth.KIND_ADMIN, "reviewer-up", all_clients=True))
+    object.__setattr__(tampered_p, "kind", auth.KIND_OWNER)
+    check("التزوير: ترقية هوية أدمن إلى مالك بحقن الحقل (object.__setattr__) تبطل شهادتها",
+          ta.attest(tampered_p) is False)
+    attest_swapped = ta.verify(ta.mint(auth.KIND_SERVICE, "session-t3", clients={"c1"}))
+    object.__setattr__(attest_swapped, "_attestation", "شهادة-مزورة")
+    check("التزوير: استبدال الشهادة نفسها في هوية أصلية يبطلها (لا شهادة ذاتية)",
+          ta.attest(attest_swapped) is False)
+    check("حدود الثقة: OwnerVerifier تحقق-فقط بلا قدرة توقيع (أقل صلاحية للمكونات)",
+          not hasattr(ta.owner_verifier(), "sign"))
 
     # ══ 2) عزل العملاء ════════════════════════════════════════════════════
     mem = store.InMemoryMemoryStore()

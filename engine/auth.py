@@ -26,6 +26,16 @@
   (closure) لا يُصدَّر كخاصية وحدة إطلاقًا، والوراثة ممنوعة، والتعديل بعد
   الإنشاء مرفوض. أي محاولة لبناء هوية مباشرة ببيانات يحددها المستدعي
   (هوية مالك أو صلاحيات موسعة) تفشل.
+- **الإغلاق حارس صحة لا حد أمني (دفعة 16 — نموذج تهديد واقعي):** إغلاق
+  Python ليس حدودًا أمنية ولا يُدَّعى كذلك — المهاجم داخل العملية يستطيع
+  قراءة خلايا الإغلاق (`__closure__`) والوصول إلى `object.__setattr__`
+  وبناء كائن متين بنيويًا. لهذا تحمل كل هوية موثقة **شهادة كريبتوغرافية
+  (`_attestation`)**: HMAC-SHA256 على الحقول الحاكمة بالمفتاح المطابق
+  لنوعها (مفتاح المالك لرموز المالك · مفتاح المنصة لما عداها) محسوبة عند
+  التحقق — `TokenAuthority.attest()` يعيد التحقق منها بمقارنة زمن-ثابت، فمن
+  يملك الكائن دون مفتاح لا يملك هوية. الحد الأمني الحقيقي هو **حيازة
+  المفتاح** (خارج المستودع) وحد العملية — لا هوية كائنات Python. النموذج
+  الكامل في docs/04-architecture/owner-auth-threat-model-2026-11-24.md.
 - **نطاق عملاء إلزامي:** رمز service يصدر لعميل محدد (جلسة) فلا يبلغ ذاكرة
   عميل آخر مهما عرف معرفه؛ رمز client لا يبلغ إلا ذاكرته هو؛ admin يصدر
   بنطاق صريح (عملاء محددون أو كل العملاء للحوكمة)؛ owner على الكل.
@@ -128,9 +138,15 @@ def _define_principal():
         كائن مجمد عمليًا: لا يُعدل بعد الإنشاء، ولا يُقبل مكان الدور النصي أبدًا
         (MemoryService يرفض أي قيمة ليست Principal موثقة). لا يُورث ولا يُنسخ
         — الوراثة ممنوعة (`__init_subclass__`) والتعديل مرفوض (`__setattr__`).
+        وتحمل `_attestation` شهادة HMAC-SHA256 على الحقول الحاكمة بالمفتاح
+        المطابق للنوع — إثبات كريبتوغرافي قابل لإعادة التحقق
+        (`TokenAuthority.attest`) لا يملكه كائن بُني بلا مفتاح.
         """
 
-        __slots__ = ("principal_id", "kind", "clients", "all_clients", "permissions", "expires_at")
+        __slots__ = (
+            "principal_id", "kind", "clients", "all_clients",
+            "permissions", "expires_at", "_attestation",
+        )
 
         def __init__(
             self,
@@ -142,6 +158,7 @@ def _define_principal():
             expires_at: int,
             *,
             _creation=None,
+            _attestation: Optional[str] = None,
         ) -> None:
             if _creation is not _creation_key:
                 raise AuthError(
@@ -155,6 +172,10 @@ def _define_principal():
             object.__setattr__(self, "all_clients", all_clients)
             object.__setattr__(self, "permissions", permissions)
             object.__setattr__(self, "expires_at", expires_at)
+            # الشهادة الكريبتوغرافية — تُحسب من مفتاح السلطة حصرًا داخل مسار
+            # التحقق (لا يقبلها المنشئ من المستدعي: مَن يمرر قيمة مدعاة
+            # بلا مفتاح ترفضها attest بالمقارنة الزمن-ثابتة).
+            object.__setattr__(self, "_attestation", _attestation)
 
         def __init_subclass__(cls, **_kwargs) -> None:
             raise AuthError(
@@ -250,6 +271,20 @@ def _define_principal():
         if kind == KIND_ADMIN and not all_clients and not clients:
             raise AuthError("رمز أدمن بلا نطاق صريح — مرفوض")
 
+        # الشهادة الكريبتوغرافية: HMAC على الحقول الحاكمة بالمفتاح المطابق
+        # للنوع — من يملك الكائن دون المفتاح لا يملك هوية موثقة (الإغلاق
+        # حارس صحة لا حد أمني — نموذج التهديد الواقعي فوق).
+        key_used = authority._owner_key if matched == "owner" else authority._auth_key
+        attestation = _compute_attestation(
+            key_used,
+            str(payload.get("sub", "")),
+            kind,
+            clients,
+            all_clients,
+            perms,
+            exp,
+        )
+
         return Principal(
             principal_id=str(payload.get("sub", "")),
             kind=kind,
@@ -258,6 +293,7 @@ def _define_principal():
             permissions=perms,
             expires_at=exp,
             _creation=_creation_key,
+            _attestation=attestation,
         )
 
     return Principal, _verify_and_mint
@@ -266,18 +302,59 @@ def _define_principal():
 Principal, _verify_and_mint = _define_principal()
 
 
+def _attestation_payload(
+    principal_id: str,
+    kind: str,
+    clients: FrozenSet[str],
+    all_clients: bool,
+    permissions: FrozenSet[str],
+    expires_at: int,
+) -> str:
+    """تمثيل حتمي للحقول الحاكمة التي تشهد عليها الشهادة (iss + ستة حقول)."""
+    return canonical_json(
+        {
+            "iss": ISSUER,
+            "sub": principal_id,
+            "kind": kind,
+            "clients": "*" if all_clients else sorted(clients),
+            "perms": sorted(permissions),
+            "exp": int(expires_at),
+        }
+    )
+
+
+def _compute_attestation(
+    key: bytes,
+    principal_id: str,
+    kind: str,
+    clients: FrozenSet[str],
+    all_clients: bool,
+    permissions: FrozenSet[str],
+    expires_at: int,
+) -> str:
+    """شهادة الهوية: HMAC-SHA256 بالمفتاح المطابق للنوع على الحقول الحاكمة."""
+    body = _attestation_payload(
+        principal_id, kind, clients, all_clients, permissions, expires_at
+    ).encode("utf-8")
+    return _b64e(hmac.new(key, body, hashlib.sha256).digest())
+
+
 def is_verified_principal(value) -> bool:
     """بوابة المستهلكين: هل القيمة هوية موثقة فعلًا؟
 
     ترفض: النصوص والقواميس والأدوار المزعومة، وأصنافًا بديلة أو موروثة،
     وكائنات أنشئت بـ``__new__`` بلا مرور بالتحقق (صفاتها غير مكتملة).
     الاستهلاك الموثوق يبدأ بهذا الفحص (MemoryService وسجل الموافقات).
+    (فحص بنيوي فقط — إثبات الهوية الكريبتوغرافي عند من يملك المفاتيح هو
+    `TokenAuthority.attest` — الإغلاق حارس صحة لا حد أمني.)
     """
     if type(value) is not Principal:
         return False
     try:
         value.describe()          # يمس الصفات الأساسية — غير المكتملة تُرفض
         int(value.expires_at)     # الطابع الزمني مكتمل وقابل للقراءة
+        if not isinstance(value._attestation, str):  # شهادة كريبتوغرافية مكتملة
+            return False
     except Exception:
         return False
     return True
@@ -398,10 +475,47 @@ class TokenAuthority:
         """
         return _verify_and_mint(self, token, now)
 
+    def attest(self, principal) -> bool:
+        """إعادة التحقق الكريبتوغرافي من هوية قائمة — حدود الثقة الفاصل.
+
+        يعيد حساب شهادة الهوية (HMAC بالمفتاح المطابق للنوع على الحقول
+        الحاكمة) ويقارنها زمن-ثابت مع شهادة الكائن. هذا الإثبات لا يتوقف على
+        هوية كائنات Python ولا على إغلاق — بل على **حيازة المفتاح**: كائن بُني
+        بنيويًا بلا مفتاح (تجاوز الإغلاق عبر `__closure__` مثلًا) يُرفض هنا
+        حتى لو عبر كل الفحوص البنيوية. المكونات الحساسة (مصادقة المالك)
+        تتطلب هذا الإثبات قبل أي تعديل على بيانات الحساب.
+        """
+        if not is_verified_principal(principal):
+            return False
+        try:
+            key = (
+                self._owner_key
+                if principal.kind == KIND_OWNER
+                else self._auth_key
+            )
+            expected = _compute_attestation(
+                key,
+                principal.principal_id,
+                principal.kind,
+                principal.clients,
+                principal.all_clients,
+                principal.permissions,
+                int(principal.expires_at),
+            )
+            return hmac.compare_digest(principal._attestation, expected)
+        except Exception:
+            return False
+
     # -- توقيع المالك لوثائق G-EX (مفتاح مستقل عن مفتاح المنصة) ---------------
     def owner_sign(self, document: Dict) -> str:
-        """توقيع وثيقة بمفتاح المالك — لأداة المالك فقط، لا للمسار الخدمي."""
-        return self.owner_verifier().sign(document)
+        """توقيع وثيقة بمفتاح المالك — لأداة المالك فقط، لا للمسار الخدمي.
+
+        التوقيع يحسب هنا مباشرةً بمفتاح المالك حصرًا: كائن التحقق الذي يُسلّم
+        للبوابة (`OwnerVerifier`) **تحقق-فقط** لا يملك قدرة التوقيع أبدًا
+        (أقل صلاحية للمكونات — حدود الثقة المكتوبة في توثيق المفاتيح).
+        """
+        body = canonical_json(document).encode("utf-8")
+        return _b64e(hmac.new(self._owner_key, body, hashlib.sha256).digest())
 
     def owner_verify(self, document: Dict, signature: str) -> bool:
         return self.owner_verifier().verify(document, signature)
@@ -415,17 +529,16 @@ class OwnerVerifier:
     """تحقق من توقيع المالك حصرًا — لا يحمل أي قدرة سكّ أو توقيع.
 
     البوابة تستلم هذا الكائن فلا يمكنها — حتى لو خُترقت — توليد توقيع مالك
-    جديد؛ التوقيع يصدر من أداة المالك خارج مسار الخدمة.
+    جديد؛ التوقيع يصدر من أداة المالك خارج مسار الخدمة
+    (`TokenAuthority.owner_sign`) — لا قدرة توقيع هنا أبدًا (دفعة 16:
+    كانت `sign` تعيش هنا رغم ادعاء التوثيق «تحقق-فقط» — أُزيلت لتطابق
+    الحد المعلن للثقة: من يريد التوقيع يطلب المفتاح/السلطة نفسها).
     """
 
     def __init__(self, owner_key: bytes) -> None:
         if len(owner_key) < 32:
             raise AuthError("مفتاح المالك يجب أن يكون ≥32 بايت")
         self._owner_key = owner_key
-
-    def sign(self, document: Dict) -> str:
-        body = canonical_json(document).encode("utf-8")
-        return _b64e(hmac.new(self._owner_key, body, hashlib.sha256).digest())
 
     def verify(self, document: Dict, signature: str) -> bool:
         if not isinstance(signature, str) or not signature:
