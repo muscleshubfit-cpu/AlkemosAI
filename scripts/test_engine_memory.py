@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""اختبارات المستوى أ — الوحدات النقية + المخزن + الخدمة (M4-ذاكرة-1).
+"""اختبارات المستوى أ — الوحدات النقية + المخزن + الخدمة (M4-ذاكرة-1 + تحصين 16-تتمة).
 
 التوقعات منقولة من اختبارات EVO الأصلية (src/lib/__tests__/evo-memory.test.ts
 @ 500ed1f) — نفس الحالات الحرجة حرفيًا، وزيادات المخزن والخدمة والحارس خاصتنا:
 روح فحوص الطفرة: كل قانون موثق في الوحدة له اختبار يثبت كسره عند الإخلال.
+
+(دفعة 16-تتمة): الخدمة صارت بالهوية الموثقة (engine.auth) — لا دور نصيًّا —
+والمخزن بقفل وذرية واستعادة ومعرفات أحادية. اختبارات التجاوز السلبية الكاملة
+في scripts/test_engine_security.py.
 """
 import os
+import secrets
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+from engine import auth  # noqa: E402
 from engine.memory import pure, service, store  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -94,7 +100,7 @@ def main():
     # ── should_extract_memory ────────────────────────────────────────────────
     check("الإيقاع: يشتعِل عند 10 ويبقى فوقها", not pure.should_extract_memory(pure.EVO_MEMORY_EXTRACT_EVERY - 1) and pure.should_extract_memory(pure.EVO_MEMORY_EXTRACT_EVERY) and pure.should_extract_memory(pure.EVO_MEMORY_EXTRACT_EVERY + 3))
 
-    # ── المخزن: JSONL + الحارس ─────────────────────────────────────────────
+    # ── المخزن: JSONL + الحارس + السلامة (16-تتمة) ──────────────────────────
     with tempfile.TemporaryDirectory() as tmp:
         st = store.JsonlMemoryStore(tmp)
         now = "2026-11-24T00:00:00.000Z"
@@ -108,16 +114,51 @@ def main():
         st2 = store.JsonlMemoryStore(tmp)
         check("المخزن: الثبات عبر الجلسات (ملفات مفتوحة)", len(st2.load_facts("c1", active_only=False)) == 3)
         st.delete_fact("c1", recs[0]["id"])
-        check("المخزن: الحذف الفعلي يزيل السجل", len(st2.all_records()) == 2 or len(st.all_records()) == 2)
+        check("المخزن: الحذف الفعلي يزيل السجل", len(st.all_records()) == 2)
         st.set_extract_count("c1", 7)
         check("المخزن: عداد الاستخراج لكل عميل", st.get_extract_count("c1") == 7 and st.get_extract_count("c2") == 0)
+
+        # معرفات أحادية لا تُعاد بعد الحذف (خلل الكشف عنه في مراجعة المحرك)
+        r4 = st.append_fact({"client_id": "c1", "fact": "حقيقة بعد الحذف", "category": "other", "is_active": True, "created_at": now, "updated_at": now, "source": "chat_extraction"})
+        ids = [r["id"] for r in st.all_records()]
+        check("المخزن: المعرف أحادي لا يُعاد أبدًا بعد الحذف", r4["id"] == "MF-000004" and len(ids) == len(set(ids)))
+
+        # استعادة: سطر أخير مبتور (أثر انقطاع كتابة)
+        st3 = store.JsonlMemoryStore(os.path.join(tmp, "recover"))
+        for i in range(3):
+            st3.append_fact({"client_id": "c9", "fact": f"حقيقة {i}", "category": "other", "is_active": True, "created_at": now, "updated_at": now, "source": "chat_extraction"})
+        with open(st3.facts_path, "ab") as fh:  # محاكاة انقطاع: سطر مبتور بلا إغلاق
+            fh.write('{"client_id": "c9", "fact": "مبتو'.encode("utf-8"))
+        st4 = store.JsonlMemoryStore(os.path.join(tmp, "recover"))
+        rows_after = st4.all_records()
+        recovered_dir = os.path.join(tmp, "recover", "recovery")
+        check("المخزن: السطر الأخير المبتور يُستعاد (3 سليمة)", len(rows_after) == 3 and all(r["fact"] != "مبتور" for r in rows_after))
+        check("المخزن: نسخة أصل محجوزة للسطر المبتور", os.path.isdir(recovered_dir) and len(os.listdir(recovered_dir)) >= 1)
+
+        # تلف وسط الملف: صوت عالٍ لا إسقاط صامت
+        st5 = store.JsonlMemoryStore(os.path.join(tmp, "midcorrupt"))
+        for i in range(4):
+            st5.append_fact({"client_id": "c9", "fact": f"حقيقة {i}", "category": "other", "is_active": True, "created_at": now, "updated_at": now, "source": "chat_extraction"})
+        lines = open(st5.facts_path, encoding="utf-8").read().splitlines()
+        lines[1] = '{"تالف":'  # تلف في الوسط
+        open(st5.facts_path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+        check("المخزن: تلف الوسط يُعلن بصوت عالٍ (FileCorruptionError)", _raises(lambda: store.JsonlMemoryStore(os.path.join(tmp, "midcorrupt")).all_records(), store.FileCorruptionError))
+
+        # تلف ملف الحالة: اشتقاق آمن بلا مس الحقائق
+        st6 = store.JsonlMemoryStore(os.path.join(tmp, "statecorrupt"))
+        st6.append_fact({"client_id": "c9", "fact": "حقيقة محفوظة", "category": "other", "is_active": True, "created_at": now, "updated_at": now, "source": "chat_extraction"})
+        st6.set_extract_count("c9", 5)
+        open(st6.state_path, "w", encoding="utf-8").write("{تالف")
+        st7 = store.JsonlMemoryStore(os.path.join(tmp, "statecorrupt"))
+        check("المخزن: تلف الحالة يشتق آمنًا (الحقائق سليمة والعداد صُفّر)", len(st7.all_records()) == 1 and st7.get_extract_count("c9") == 0)
 
     check("الحارس: يرفض مخزنًا داخل شجرة git (المستودع العام)", _raises(lambda: store.JsonlMemoryStore(REPO_ROOT), ValueError))
     check("الحارس: يرفض المسار النسبي", _raises(lambda: store.JsonlMemoryStore("data/memory"), ValueError))
 
-    # ── الخدمة: الدورة + الأدوار + الحوكمة ─────────────────────────────────
+    # ── الخدمة: هوية موثقة + الدورة + الأدوار + الحوكمة ─────────────────────
+    ta = auth.TokenAuthority(secrets.token_bytes(32), secrets.token_bytes(32))
     mem = store.InMemoryMemoryStore()
-    svc = service.MemoryService(mem, role="service")
+    svc = service.MemoryService(mem, ta.verify(ta.mint(auth.KIND_SERVICE, "session-1", clients={"c1"})))
     ok_extract = False
     for i in range(9):
         extracted, stored = svc.record_exchange("c1", [], f"رسالة {i}", "رد", [])
@@ -135,18 +176,22 @@ def main():
     extracted, stored = svc.record_exchange("c1", [], "سؤال", "رد", [{"fact": "يتمرن في الجيم 4 أيام أسبوعيًا", "category": "lifestyle"}])
     check("الخدمة: التكرار ضد الحقائق النشطة القائمة يُمنع", len(stored) == 0)
 
-    admin = service.MemoryService(mem, role="admin")
-    check("الخدمة: الأدمن لا يكتب (حقن الكتابة للخدمة)", _raises(lambda: admin.record_exchange("c1", [], "س", "ر", []), service.MemoryServiceError))
+    admin = service.MemoryService(mem, ta.verify(ta.mint(auth.KIND_ADMIN, "reviewer-1", all_clients=True)))
+    check("الخدمة: الأدمن لا يكتب (حقن الكتابة للخدمة)", _raises(lambda: admin.record_exchange("c1", [], "س", "ر", []), service.AccessDenied))
     facts_all = admin.review_facts("c1")
     check("الخدمة: قراءة الأدمن للمراجعة", len(facts_all) == 2)
     admin.deactivate_fact("c1", facts_all[0]["id"])
     check("الخدمة: إلغاء التنشيط يخرج الحقيقة من الحقن", facts_all[0]["fact"] not in svc.get_injectable_context("c1"))
+    check("الخدمة: الأدمن لا يحذف نهائيًا (أقل صلاحية)", _raises(lambda: admin.hard_delete_fact("c1", facts_all[0]["id"], "أمر"), service.AccessDenied))
 
-    owner = service.MemoryService(mem, role="owner")
+    owner = service.MemoryService(mem, ta.verify(ta.mint(auth.KIND_OWNER, "owner-1")))
     check("الخدمة: الحذف النهائي بلا أمر مالك موثق مرفوض (D2)", _raises(lambda: owner.hard_delete_fact("c1", facts_all[0]["id"], "  "), service.MemoryServiceError))
     deleted = owner.hard_delete_fact("c1", facts_all[0]["id"], "أمر مالك 2026-11-24-حذف")
     check("الخدمة: الحذف النهائي بأمر موثق ينفذ", deleted and len(mem.all_records()) == 1)
-    check("الخدمة: دور مجهول مرفوض من البناء", _raises(lambda: service.MemoryService(mem, role="ghost"), service.MemoryServiceError))
+
+    # رفض الآلة القديمة: دور نصي من المستدعي لا يمنح شيئًا أبدًا
+    check("الخدمة: دور نصي من المستدعي مرفوض من البناء (لا role= بعد اليوم)", _raises(lambda: service.MemoryService(mem, "owner"), service.MemoryServiceError))
+    check("الخدمة: بناء بدور خدمة نصي مرفوض كذلك", _raises(lambda: service.MemoryService(mem, "service"), service.MemoryServiceError))
 
     passed = sum(1 for _, ok in results if ok)
     print(f"\n{passed}/{len(results)} اختبارًا ناجحًا")
