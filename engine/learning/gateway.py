@@ -3,22 +3,32 @@
 """بوابة اعتماد الأمثلة قبل التدريب (G-EX) — الخطة §6: الشروط الستة + توقيع المالك.
 
 لا مثال يعبر إلا باكتمال الشروط الستة مجتمعة وتوقيع مالك — والمخرجات:
-- المقبول → datasets/approved/EX-xxxx بإصدار وبصمة sha256 وأصل كامل
-  + قيد تعلم جاهز للملك في learning-log (القبول ذاته يوثقه المالك).
-- المرفوض → memory/archive بسببه الموثق — لا حذف أبدًا.
+- المقبول → EX-xxxx بإصدار وبصمة sha256 وأصل كامل + قيد في سجل الاعتماد
+  (سلسلة بصمات) + قيد تعلم جاهز للملك في learning-log.
+- المرفوض → الأرشيف بسببه الموثق — لا حذف أبدًا.
 
 الشروط (مطبقة آليًا ما أمكن، والبقية إثبات موثق من المتصل):
 1. أصل موثق: ملف مصدر موجود + SHA256 مطابق حرفيًا + تاريخ اطلاع صالح تقويميًا.
 2. تجريد هوية مكتمل: فحص قائمة الحرمان الآلي صفر الإصابات + مراجعة بشرية موثقة
    (المراجع والتاريخ) — إزالة الاسم وحدها لا تساوي تجريدًا مكتملًا.
-3. أساس استخدام مصرح: موافقة العميل الصريحة الموثقة (opt-in يحترم الانسحاب)
-   أو أساس موثق يقرره المالك ويُقيد في learning-log — وسحب الموافقة يمنع
-   استخدام المثال في أي دفعة تالية (check_withdrawal).
+3. أساس استخدام مصرح: **من سجل الموافقات الموثوق حصرًا** (engine/learning/consent.py)
+   — موافقة العميل الصريحة (opt-in) أو أساس يقرره المالك، وكلاهما يوثق في السجل
+   المرتبط بهوية العميل والغرض ونطاق الاستخدام والتاريخ. قيم المرشح (مثل withdrawn)
+   لا تُقبل إثباتًا أبدًا. الانسحاب يمنع أي اعتماد جديد على الأساس المسحوب مع
+   بقاء سجل التدقيق كاملًا (check_withdrawal يستبعد القديم من الدفعات التالية).
 4. جودة المصدر: تغذية راجعة إيجابية أو اجتياز بوابات السلامة/التقييم
    (قاضٍ 0–10 بعتبة قابلة للضبط — الافتراضي 7، وتعديلها بقرار مالك موثق).
 5. لا تعارض: لا تكرار لنفس الأصل المعتمد سابقًا + إقرار حل التعارضات مع
    بطاقات المستوى ب (بصيغة conflicts_resolved موثقة من المراجعة).
 6. تصنيف استخدام واحد لا يُعدل بعد الاعتماد: تدريب فقط / تدريب+استرجاع / استرجاع فقط.
+
+توقيع المالك (دفعة 16-تتمة — استبدال قبول نص "owner" بتحقق حقيقي):
+- الاعتماد يتطلب وثيقة اعتماد موقعة HMAC-SHA256 **بمفتاح المالك المستقل**
+  (engine/auth.OwnerVerifier) — النص "owner" في أي حقل لا يمنح شيئًا.
+- الوثيقة تحمل بصمة المحتوى وبصمة الأصل — **التوقيع مقيد بمثاله** فلا يعاد
+  استخدامه لمثال آخر (anti-replay)، وتوثق داخل الملف المعتمد وسجل الاعتماد.
+- بلا سجل موافقات أو بلا آلية تحقق مالك: البوابة تفشل مغلقة (fail-closed) —
+  لا اعتماد بتاتًا، لا تراجع إلى الإثبات الذاتي من المرشح.
 
 هذه البوابة كود حاكم فقط — لا تفتح أي تدفق بيانات من تلقاء نفسها: مصادر
 المستوى ج لا تُقرأ هنا، والمرشح يصل من المتصل مكتمل الإثباتات.
@@ -32,16 +42,19 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ..auth import GEX_APPROVE_SCOPE, OwnerVerifier, gex_approval_document
+from ..fsafety import atomic_write_text
 from . import denier
-
-USAGE_TRAINING_ONLY = "training_only"
-USAGE_TRAINING_RETRIEVAL = "training_retrieval"
-USAGE_RETRIEVAL_ONLY = "retrieval_only"
-USAGE_CLASSES = (USAGE_TRAINING_ONLY, USAGE_TRAINING_RETRIEVAL, USAGE_RETRIEVAL_ONLY)
-
-BASIS_CLIENT_CONSENT = "client_consent"
-BASIS_OWNER_DECIDED = "owner_basis"
-BASIS_KINDS = (BASIS_CLIENT_CONSENT, BASIS_OWNER_DECIDED)
+from .audit import AdoptionLedger, entry_fingerprint
+from .consent import (
+    BASIS_CLIENT_CONSENT,
+    BASIS_KINDS,
+    BASIS_OWNER_DECIDED,
+    USAGE_CLASSES,
+    USAGE_RETRIEVAL_ONLY,
+    USAGE_TRAINING_ONLY,
+    USAGE_TRAINING_RETRIEVAL,
+)
 
 QUALITY_POSITIVE_FEEDBACK = "positive_feedback"
 QUALITY_SAFETY_PASS = "safety_pass"
@@ -83,8 +96,11 @@ def _sha256_text(text: str) -> str:
 
 
 class ExampleGateway:
-    """بوابة G-EX فوق أدلة معتمدة/أرشيف — كل مسار يُدار خارج شجرة git أو داخل
-    المستودع حسب قرار المالك عند التفعيل الحقيقي؛ الاختبارات تستخدم أدلة مؤقتة.
+    """بوابة G-EX — الشروط الستة + توقيع مالك متحقق + سجل اعتماد بسلسلة بصمات.
+
+    كل مسار يُدار خارج شجرة git أو داخل المستودع حسب قرار المالك عند التفعيل
+    الحقيقي (D-17)؛ الاختبارات تستخدم أدلة مؤقتة. سجل الموافقات حرسه يرفض
+    أي جذر داخل شجرة git (بيانات المستوى أ).
     """
 
     def __init__(
@@ -92,12 +108,23 @@ class ExampleGateway:
         approved_dir: str | Path,
         archive_dir: str | Path,
         judge_min: int = GATE_JUDGE_MIN_DEFAULT,
+        *,
+        consent_ledger=None,
+        owner_verifier: Optional[OwnerVerifier] = None,
+        adoption_ledger: Optional[AdoptionLedger] = None,
     ) -> None:
         self.approved_dir = Path(approved_dir)
         self.archive_dir = Path(archive_dir)
         self.approved_dir.mkdir(parents=True, exist_ok=True)
         self.archive_dir.mkdir(parents=True, exist_ok=True)
         self.judge_min = judge_min
+        # fail-closed: لا سجل موافقات → الشرط 3 يرفض كل مرشح حتى لا يعود
+        # التحقق إلى قيم المرشح الذاتية (كانت الثغرة الثانية في مراجعة المحرك).
+        self.consent_ledger = consent_ledger
+        self.owner_verifier = owner_verifier
+        self.adoption_ledger = adoption_ledger or AdoptionLedger(
+            self.approved_dir / "adoption-ledger.jsonl"
+        )
 
     # ── الشروط الستة ─────────────────────────────────────────────────────────
     def check_origin(self, cand: Dict) -> List[str]:
@@ -132,15 +159,24 @@ class ExampleGateway:
         return errors
 
     def check_basis(self, cand: Dict) -> List[str]:
+        """الشرط 3 من سجل الموافقات حصرًا — قيم المرشح (withdrawn وغيرها) لا تُقبل."""
         errors: List[str] = []
         basis = cand.get("basis") or {}
         kind = basis.get("kind")
         if kind not in BASIS_KINDS:
             return [f"شرط 3 (الأساس المصرح): النوع يجب أن يكون {BASIS_KINDS}"]
-        if not (basis.get("reference") or "").strip():
-            errors.append("شرط 3 (الأساس المصرح): مرجع الموافقة/الأساس مفقود")
-        if basis.get("withdrawn"):
-            errors.append("شرط 3 (الأساس المصرح): الأساس مسحوب — المثال ممنوع من أي دفعة تالية")
+        reference = (basis.get("reference") or "").strip()
+        if not reference:
+            return ["شرط 3 (الأساس المصرح): مرجع الموافقة/الأساس مفقود"]
+        if self.consent_ledger is None:
+            return [
+                "شرط 3 (الأساس المصرح): لا تحقق بلا سجل موافقات موثوق — "
+                "قيم المرشح الذاتية ليست إثباتًا (fail-closed؛ زوّد ConsentLedger)"
+            ]
+        usage = cand.get("usage")
+        refusal = self.consent_ledger.is_usable(reference, kind, usage)
+        if refusal:
+            errors.append(f"شرط 3 (الأساس المصرح): {refusal}")
         return errors
 
     def check_quality(self, cand: Dict) -> List[str]:
@@ -195,22 +231,59 @@ class ExampleGateway:
         """تقديم مرشح — الفحوص الآلية فقط، بلا أي كتابة (لا اعتماد تلقائي أبدًا)."""
         return self.run_checks(cand)
 
-    def approve(self, cand: Dict, owner_signature: Dict) -> Dict:
-        """اعتماد مثال — يتطلب الشروط الستة + توقيع المالك الموثق.
+    def _verify_owner_approval(self, cand: Dict, owner_signature: Dict) -> Dict:
+        """تحقق حقيقي من توقيع المالك — يعيد الوثيقة المتحقق منها أو يرفض.
 
-        يكتب EX-xxxx في دليل المعتمد بإصدار وبصمة وأصل كامل، ويعيد قيد التعلم
-        الجاهز (توقيع الاعتماد النهائي وإدراج القيد في learning-log على المالك).
+        الوثيقة مقيدة ببصمة المحتوى وبصمة الأصل — لا يصح توقيع لمثال غير مثاله.
+        """
+        if self.owner_verifier is None:
+            raise GatewayError(
+                "الاعتماد يتطلب آلية تحقق حقيقية من هوية المالك (OwnerVerifier بمفتاح "
+                "المالك المستقل) — لا اعتماد بلا تحقق، والنص «owner» لا يمنح شيئًا (fail-closed)"
+            )
+        if not isinstance(owner_signature, dict):
+            raise GatewayError("توقيع المالك يجب أن يكون وثيقة {document, signature} — لا نصًّا")
+        document = owner_signature.get("document")
+        signature = owner_signature.get("signature")
+        if not isinstance(document, dict) or not isinstance(signature, str) or not signature:
+            raise GatewayError(
+                "توقيع المالك ناقص — المطلوب {document: وثيقة الاعتماد, signature: توقيعها}"
+            )
+        if document.get("scope") != GEX_APPROVE_SCOPE:
+            raise GatewayError(
+                f"نطاق وثيقة التوقيع يجب أن يكون '{GEX_APPROVE_SCOPE}' — توقيع خارج نطاق الاعتماد مرفوض"
+            )
+        if not (document.get("decision_ref") or "").strip():
+            raise GatewayError("التوقيع بلا مرجع قرار موثق")
+        if not _valid_calendar_date(document.get("signed_at", "")):
+            raise GatewayError("تاريخ التوقيع غير صالح تقويميًا (YYYY-MM-DD)")
+        expected_content = _sha256_text(cand.get("content", ""))
+        expected_origin = (cand.get("origin") or {}).get("sha256", "")
+        if document.get("content_sha256") != expected_content:
+            raise GatewayError(
+                "بصمة المحتوى في وثيقة التوقيع لا تطابق المرشح — التوقيع مقيد بمثاله (لا إعادة استخدام)"
+            )
+        if document.get("origin_sha256") != expected_origin:
+            raise GatewayError(
+                "بصمة الأصل في وثيقة التوقيع لا تطابق المرشح — التوقيع مقيد بمثاله (لا إعادة استخدام)"
+            )
+        if not self.owner_verifier.verify(document, signature):
+            raise GatewayError(
+                "توقيع المالك غير صالح — لم يصدر عن مفتاح المالك (تحقق HMAC فشل)"
+            )
+        return document
+
+    def approve(self, cand: Dict, owner_signature: Dict) -> Dict:
+        """اعتماد مثال — الشروط الستة + توقيع مالك متحقق + قيد سجل اعتماد.
+
+        يكتب EX-xxxx بإصدار وبصمة وأصل كامل (كتابة ذرية)، ويلحق قيدًا بسجل
+        الاعتماد (سلسلة بصمات)، ويعيد قيد التعلم الجاهز للملك.
         تصنيف الاستخدام يُختم مرة واحدة في الملف المعتمد ولا يُعدل بعدها.
         """
+        document = self._verify_owner_approval(cand, owner_signature)
         report = self.run_checks(cand)
         if not report["passed"]:
             raise GatewayError("بوابة G-EX رفضت الاعتماد — " + " | ".join(report["errors"]))
-        if not owner_signature or (owner_signature.get("signer") or "").strip() != "owner":
-            raise GatewayError("الاعتماد يتطلب توقيع المالك (signer=owner) — لا اعتماد بلا توقيع")
-        if not (owner_signature.get("decision_ref") or "").strip():
-            raise GatewayError("التوقيع بلا مرجع قرار موثق")
-        if not _valid_calendar_date(owner_signature.get("signed_at", "")):
-            raise GatewayError("تاريخ التوقيع غير صالح تقويميًا (YYYY-MM-DD)")
 
         seq = len(self._load_approved()) + 1
         example_id = f"EX-{seq:04d}"
@@ -220,21 +293,39 @@ class ExampleGateway:
             "content": cand["content"],
             "content_sha256": _sha256_text(cand["content"]),
             "origin": cand["origin"],
-            "basis": cand["basis"],
+            "basis": {
+                "kind": cand["basis"]["kind"],
+                "reference": cand["basis"]["reference"],
+                "verified_via": "consent-ledger",
+            },
             "quality": cand["quality"],
             "usage": cand["usage"],
             "deid": cand.get("deid"),
             "conflicts_resolved": cand.get("conflicts_resolved"),
             "owner_signature": {
-                "signer": "owner",
-                "signed_at": owner_signature["signed_at"],
-                "decision_ref": owner_signature["decision_ref"],
+                "scope": document["scope"],
+                "decision_ref": document["decision_ref"],
+                "signed_at": document["signed_at"],
+                "content_sha256": document["content_sha256"],
+                "origin_sha256": document["origin_sha256"],
+                "signature": owner_signature["signature"],
+                "verified_by": "owner-key (HMAC-SHA256)",
             },
             "created_at": utc_now_iso(),
         }
         out_path = self.approved_dir / f"{example_id}.json"
-        out_path.write_text(
-            json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        atomic_write_text(
+            out_path, json.dumps(record, ensure_ascii=False, indent=2) + "\n"
+        )
+        # قيد سجل الاعتماد — سلسلة بصمات: هوية المعتمد وبصمة العنصر ووقت الاعتماد.
+        self.adoption_ledger.append(
+            example_id=example_id,
+            content_sha256=record["content_sha256"],
+            origin_sha256=record["origin"]["sha256"],
+            adopter="owner (موثق بمفتاح المالك)",
+            decision_ref=document["decision_ref"],
+            signed_at=document["signed_at"],
+            usage=record["usage"],
         )
         return {"example_id": example_id, "record": record, "log_entry": self._log_entry(record)}
 
@@ -256,20 +347,35 @@ class ExampleGateway:
             "created_at": utc_now_iso(),
         }
         out_path = self.archive_dir / f"REJ-{seq:04d}.json"
-        out_path.write_text(
-            json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        atomic_write_text(
+            out_path, json.dumps(record, ensure_ascii=False, indent=2) + "\n"
         )
         return record
 
-    # ── الانسحاب (شرط 3: السحب يمنع أي دفعة تالية) ──────────────────────────
+    # ── الانسحاب (شرط 3: السحب يمنع أي اعتماد جديد ودفعة تالية) ──────────────
     def check_withdrawal(self, basis_reference: str) -> List[str]:
-        """أمثلة معتمدة بُنيت على أساس مُسحب — تُستبعد من أي دفعة تدريب تالية."""
+        """أمثلة معتمدة بُنيت على أساس مُسحب — تُستبعد من أي دفعة تدريب تالية.
+
+        الانسحاب يمنع الاعتمادات الجديدة من نفسه عبر check_basis (السجل)،
+        وهذه الدالة تحصر القديمة لاستبعادها من الدفعات — سجل التدقيق يبقى كاملًا.
+        """
         affected = []
         for existing in self._load_approved():
             basis = existing.get("basis") or {}
             if basis.get("reference") == basis_reference:
                 affected.append(existing["example_id"])
         return affected
+
+    # ── سلامة الاعتماد (سجل + ملفات) ─────────────────────────────────────────
+    def verify_integrity(self) -> Dict:
+        """سلامة الاعتماد كاملة: سلسلة السجل + تقاطعه مع الملفات المعتمدة."""
+        chain = self.adoption_ledger.verify_chain()
+        coverage = self.adoption_ledger.coverage(self.approved_dir)
+        return {
+            "ok": chain["ok"] and coverage["ok"],
+            "chain": chain,
+            "coverage": coverage,
+        }
 
     # ── أدوات داخلية ─────────────────────────────────────────────────────────
     def _load_approved(self) -> List[Dict]:
@@ -294,9 +400,10 @@ class ExampleGateway:
             f"- **المدخل:** مثال تدريب {record['example_id']} ({record['version']}) — "
             f"الأصل {record['origin'].get('path')} @ {record['origin'].get('sha256', '')[:12]}\n"
             f"- **القياس قبل/بعد:** بصمة المحتوى {record['content_sha256'][:12]}… · "
-            f"الأساس {record['basis'].get('kind')} ({record['basis'].get('reference')})\n"
-            "- **القرار:** قبول (توقيع المالك موثق في الملف)\n"
-            f"- **ما أُضيف:** datasets/approved/{record['example_id']}.json — "
+            f"الأساس {record['basis'].get('kind')} ({record['basis'].get('reference')}) — "
+            "متحقق من سجل الموافقات\n"
+            "- **القرار:** قبول (توقيع المالك متحقق بمفتاحه المستقل وموثق في الملف وسجل الاعتماد)\n"
+            f"- **ما أُضيف:** {record['example_id']}.json + قيد سجل الاعتماد — "
             f"تصنيف الاستخدام {record['usage']}\n"
             "- **ما رُفض ولماذا:** —\n"
         )
